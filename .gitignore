@@ -1,0 +1,7 @@
+﻿.idea/
+.venv/
+__pycache__/
+*.db
+*.db-wal
+*.db-shm
+.session_cache.json
