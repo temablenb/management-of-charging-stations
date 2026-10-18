@@ -1,0 +1,10 @@
+.git
+.venv
+.idea
+__pycache__/
+*.db
+*.db-wal
+*.db-shm
+.session_cache.json
+.env
+data/
