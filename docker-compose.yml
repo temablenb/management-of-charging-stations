@@ -7,3 +7,4 @@ services:
       - .data:/app/data
     environment:
       DB_PATH: ${DB_PATH:-/app/data/ev_charging_opt.db}
+    restart: unless-stopped
