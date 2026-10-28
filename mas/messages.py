@@ -81,3 +81,39 @@ class PowerRequest(Message):
     @property
     def type(self) -> MessageType:
         return MessageType.POWER_REQUEST
+
+
+@dataclass(frozen=True)
+class PowerAllocation(Message):
+    """Ответ Grid Agent станции: выделенная мощность и тарифный множитель."""
+
+    allocated_kw: float
+    tariff_multiplier: float
+
+    def __post_init__(self):
+        if self.allocated_kw < 0:
+            raise ValueError("Выделенная мощность не может быть отрицательной")
+        if self.tariff_multiplier <= 0:
+            raise ValueError("Тарифный множитель должен быть положительным")
+
+    @property
+    def type(self) -> MessageType:
+        return MessageType.POWER_ALLOCATION
+
+
+@dataclass(frozen=True)
+class StorageOffer(Message):
+    """Предложение накопителя Grid Agent: сколько мощности можно отдать."""
+
+    available_kw: float
+    soc: float
+
+    def __post_init__(self):
+        if self.available_kw < 0:
+            raise ValueError("Доступная мощность не может быть отрицательной")
+        if not 0.0 <= self.soc <= 1.0:
+            raise ValueError("Уровень заряда накопителя должен быть от 0 до 1")
+
+    @property
+    def type(self) -> MessageType:
+        return MessageType.STORAGE_OFFER
