@@ -8,7 +8,7 @@ def main():
     try:
         import streamlit
         import pandas
-        import statsmodls
+        import statsmodels
         import pulp
     except ImportError:
         print("\nОтсутствуют обязательные зависимости.")
