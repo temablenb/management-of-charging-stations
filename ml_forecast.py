@@ -46,6 +46,7 @@ def train_and_predict_station(station_id: int) -> tuple[pd.DataFrame, float, flo
         seasonal_periods=24,
         initialization_method="estimated",
     ).fit(optimized=True, use_brute=False)
+    aic = float(hw_full.aic)
 
     now = datetime.now().replace(minute=0, second=0, microsecond=0)
     idx = pd.date_range(start=now + timedelta(hours=1), periods=FORECAST_HORIZON, freq="h")
@@ -64,7 +65,7 @@ def train_and_predict_station(station_id: int) -> tuple[pd.DataFrame, float, flo
         "timestamp": idx.strftime("%Y-%m-%d %H:%M:%S"),
         "predicted_load_kw": np.round(adjusted_pred, 2),
         "mae": np.round(mae, 3),
-        "aic": np.round(sse, 2),
+        "aic": np.round(aic, 2),
     })
     save_forecast(forecast_df)
 
