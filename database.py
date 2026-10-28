@@ -57,6 +57,14 @@ def init_schema():
                 is_custom INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(brand, model)
             );
+            СREATE TABLE IF NOT EXISTS manual_load_adjustments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                station_id INTEGER NOT NULL,
+                timestamp TEXT NOT NULL,
+                adjustment_factor REAL NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(station_id) REFERENCES stations(id)
+            );
         """)
 
         ev_models = [
