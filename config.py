@@ -1,6 +1,9 @@
 import os
 
-DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ev_charging_opt.db")
+DB_PATH = os.environ.get(
+    "DB_PATH",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "ev_charging_opt.db"),
+)
 
 SUBSTATION_LIMIT_KW = 420.0
 BASE_TARIFF_RUB = 10.0
