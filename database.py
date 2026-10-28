@@ -254,7 +254,7 @@ def get_stations_info() -> pd.DataFrame:
 
 def clear_future_data(from_timestamp: str):
     with sqlite3.connect(DB_PATH) as conn:
-        conn.execute(f"DELETE FROM history WHERE timestamp >= '{from_timestamp}'")
+        conn.execute("DELETE FROM history WHERE timestamp >= ?", (from_timestamp,))
         conn.execute("DELETE FROM forecasts")
         conn.execute("DELETE FROM tariffs")
         conn.execute("DELETE FROM manual_load_adjustments")
@@ -400,7 +400,7 @@ def get_system_stats() -> dict:
 def get_forecast_summary(station_id: int) -> pd.DataFrame:
     with sqlite3.connect(DB_PATH) as conn:
         return pd.read_sql("""
-            SELECT timestamp, predicted_load_kw, upper_bound_kw, lower_bound_kw
+            SELECT timestamp, predicted_load_kw
             FROM forecasts
             WHERE station_id = ?
               AND timestamp >= (SELECT MAX(created_at) FROM forecasts WHERE station_id = ?)
