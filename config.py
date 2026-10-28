@@ -1,6 +1,6 @@
 import os
 
-DDB_PATH = os.environ.get(
+DB_PATH = os.environ.get(
     "DB_PATH",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "ev_charging_opt.db"),
 )
