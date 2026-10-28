@@ -62,3 +62,22 @@ class ChargePlan(Message):
     @property
     def type(self) -> MessageType:
         return MessageType.CHARGE_PLAN
+
+
+@dataclass(frozen=True)
+class PowerRequest(Message):
+    """Запрос станции к Grid Agent: потребность и прогноз нагрузки."""
+
+    demand_kw: float
+    max_power_kw: float
+    forecast_kw: tuple[float, ...]
+
+    def __post_init__(self):
+        if self.demand_kw < 0:
+            raise ValueError("Потребность не может быть отрицательной")
+        if self.max_power_kw <= 0:
+            raise ValueError("Максимальная мощность станции должна быть положительной")
+
+    @property
+    def type(self) -> MessageType:
+        return MessageType.POWER_REQUEST
