@@ -28,6 +28,7 @@ from config import (
     MAP_CENTER_LAT, MAP_CENTER_LON, MAP_ZOOM
 )
 
+EV_PLACEHOLDER = "— Выбрать из списка —"
 _original_connect = sqlite3.connect
 
 
@@ -299,7 +300,7 @@ def render_auth_screen():
             reg_email = st.text_input("Email", key="reg_email", placeholder="Необязательно")
 
             ev_df = get_ev_models()
-            ev_options = ["— Выбрать из списка —"] + [
+            ev_options = [EV_PLACEHOLDER] + [
                 f"{r['brand']} {r['model']} ({r['battery_kwh']} кВт·ч, {r['connector_type']})" for _, r in ev_df.iterrows()
             ] + ["Добавить свой автомобиль"]
 
@@ -323,7 +324,7 @@ def render_auth_screen():
                     "connector_type": custom_connector
                 }
             else:
-                if reg_ev != "Выбрать из списка":
+                if reg_ev != EV_PLACEHOLDER:
                     selected_row = ev_df[ev_df.apply(lambda r: f"{r['brand']} {r['model']} ({r['battery_kwh']} кВт·ч, {r['connector_type']})",
                                                      axis=1) == reg_ev]
                     if not selected_row.empty:
@@ -336,7 +337,7 @@ def render_auth_screen():
                     st.error("Пароль слишком короткий (минимум 4 символа)")
                 elif reg_password != reg_password2:
                     st.error("Пароли не совпадают")
-                elif reg_ev == "— Выбрать из списка —" and custom_ev_data is None:
+                elif reg_ev == EV_PLACEHOLDER and custom_ev_data is None:
                     st.error("Пожалуйста, выберите электромобиль из списка или добавьте свой.")
                 else:
                     final_ev_model_id = ev_model_id_to_save
