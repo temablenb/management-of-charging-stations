@@ -19,33 +19,6 @@ class StationConfig:
         if self.slots < 1:
             raise ValueError("На станции должно быть хотя бы одно место")
 
-    def rng(self) -> np.random.Generator:
-        """Новый генератор случайных чисел: один seed даёт одну и ту же последовательность."""
-        return np.random.default_rng(self.seed)
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "ScenarioConfig":
-        required = (
-            "name", "seed", "days", "substation_limit_kw", "base_tariff_rub",
-            "tariff_min_mult", "tariff_max_mult", "ev_per_day", "stations",
-        )
-        missing = [key for key in required if key not in data]
-        if missing:
-            raise ValueError(f"В сценарии не заданы поля: {', '.join(missing)}")
-        storage = data.get("storage")
-        return cls(
-            name=data["name"],
-            seed=int(data["seed"]),
-            days=int(data["days"]),
-            substation_limit_kw=float(data["substation_limit_kw"]),
-            base_tariff_rub=float(data["base_tariff_rub"]),
-            tariff_min_mult=float(data["tariff_min_mult"]),
-            tariff_max_mult=float(data["tariff_max_mult"]),
-            ev_per_day=int(data["ev_per_day"]),
-            stations=tuple(StationConfig(**item) for item in data["stations"]),
-            storage=StorageConfig(**storage) if storage else None,
-        )
-
 
 @dataclass(frozen=True)
 class StorageConfig:
@@ -94,6 +67,33 @@ class ScenarioConfig:
         ids = [station.station_id for station in self.stations]
         if len(set(ids)) != len(ids):
             raise ValueError("Идентификаторы станций должны быть уникальными")
+
+    def rng(self) -> np.random.Generator:
+        """Новый генератор случайных чисел: один seed даёт одну и ту же последовательность."""
+        return np.random.default_rng(self.seed)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "ScenarioConfig":
+        required = (
+            "name", "seed", "days", "substation_limit_kw", "base_tariff_rub",
+            "tariff_min_mult", "tariff_max_mult", "ev_per_day", "stations",
+        )
+        missing = [key for key in required if key not in data]
+        if missing:
+            raise ValueError(f"В сценарии не заданы поля: {', '.join(missing)}")
+        storage = data.get("storage")
+        return cls(
+            name=data["name"],
+            seed=int(data["seed"]),
+            days=int(data["days"]),
+            substation_limit_kw=float(data["substation_limit_kw"]),
+            base_tariff_rub=float(data["base_tariff_rub"]),
+            tariff_min_mult=float(data["tariff_min_mult"]),
+            tariff_max_mult=float(data["tariff_max_mult"]),
+            ev_per_day=int(data["ev_per_day"]),
+            stations=tuple(StationConfig(**item) for item in data["stations"]),
+            storage=StorageConfig(**storage) if storage else None,
+        )
 
 
 def load_scenario(path: str | Path) -> ScenarioConfig:
