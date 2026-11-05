@@ -83,6 +83,21 @@ class MessageBus:
             result.append(entry)
         return result
 
+    def count_by_type(self) -> dict[MessageType, int]:
+        """Сколько сообщений каждого типа было доставлено."""
+        counts: dict[MessageType, int] = {}
+        for entry in self._journal:
+            message_type = entry.message.type
+            counts[message_type] = counts.get(message_type, 0) + 1
+        return counts
+
+    def reset(self) -> None:
+        """Очищает ящики, очередь и журнал; регистрация агентов сохраняется."""
+        for agent_id in self._inboxes:
+            self._inboxes[agent_id] = []
+        self._pending = []
+        self._journal = []
+
     @property
     def pending_count(self) -> int:
         return len(self._pending)
