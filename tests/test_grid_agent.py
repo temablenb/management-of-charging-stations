@@ -4,12 +4,15 @@ from mas.agent import BaseAgent
 from mas.bus import MessageBus
 from mas.grid_agent import GridAgent
 from mas.messages import ChargeRequest, MessageType, PowerRequest, StorageOffer
+from mas.allocation import AllocationResult
 
 
-def make_power_request(sender, tick=1, demand_kw=50.0, max_power_kw=100.0, priority=1.0):
+def make_power_request(
+    sender, tick=1, demand_kw=50.0, max_power_kw=100.0, priority=1.0, forecast_kw=()
+):
     return PowerRequest(
         sender=sender, receiver="grid", tick=tick,
-        demand_kw=demand_kw, max_power_kw=max_power_kw, forecast_kw=(),
+        demand_kw=demand_kw, max_power_kw=max_power_kw, forecast_kw=forecast_kw,
         priority=priority,
     )
 
@@ -216,13 +219,14 @@ def test_run_allocation_sends_power_to_stations(setup):
     run_requests(bus, grid, stations, {"st-1": 30.0, "st-2": 40.0})
     grid.run_allocation()
     bus.deliver()
-    for station_id, expected in (("st-1", 30.0), ("st-2", 40.0)):
+    expected = (("st-1", 30.0, 0.85), ("st-2", 40.0, 0.91375))
+    for station_id, expected_kw, expected_multiplier in expected:
         (message,) = bus.receive(station_id)
         assert message.type == MessageType.POWER_ALLOCATION
         assert message.sender == "grid"
         assert message.tick == 1
-        assert message.allocated_kw == expected
-        assert message.tariff_multiplier == 1.0
+        assert message.allocated_kw == expected_kw
+        assert message.tariff_multiplier == pytest.approx(expected_multiplier, abs=1e-3)
 
 
 def test_custom_multipliers_are_sent(setup):
@@ -247,3 +251,47 @@ def test_run_allocation_returns_computed_result(setup):
     bus, grid, stations = setup
     run_requests(bus, grid, stations, {"st-1": 30.0})
     assert grid.run_allocation().allocated_kw == {"st-1": 30.0}
+
+
+def test_non_positive_tariff_range_rejected():
+    with pytest.raises(ValueError):
+        GridAgent(MessageBus(), limit_kw=100.0, tariff_min_mult=1.6, tariff_max_mult=0.7)
+
+
+def test_multipliers_grow_with_station_load(setup):
+    bus, grid, stations = setup
+    run_requests(bus, grid, stations, {"st-1": 20.0, "st-2": 70.0}, tick=48)
+    multipliers = grid.compute_multipliers(grid.compute_allocation())
+    assert multipliers["st-1"] == pytest.approx(0.967, abs=1e-3)
+    assert multipliers["st-2"] == pytest.approx(1.367, abs=1e-3)
+
+
+def test_multiplier_is_higher_in_peak_than_at_night(setup):
+    bus, grid, stations = setup
+    run_requests(bus, grid, stations, {"st-1": 40.0}, tick=2)
+    night = grid.compute_multipliers(grid.compute_allocation())["st-1"]
+    run_requests(bus, grid, stations, {"st-1": 40.0}, tick=72)
+    peak = grid.compute_multipliers(grid.compute_allocation())["st-1"]
+    assert peak > night
+
+
+def test_curtailment_raises_multiplier(setup):
+    bus, grid, stations = setup
+    run_requests(bus, grid, stations, {"st-1": 40.0, "st-2": 40.0}, tick=48)
+    full = grid.compute_multipliers(AllocationResult({"st-1": 40.0, "st-2": 40.0}, False))
+    cut = grid.compute_multipliers(AllocationResult({"st-1": 20.0, "st-2": 20.0}, True))
+    assert full["st-1"] == pytest.approx(1.075, abs=1e-3)
+    assert cut["st-1"] == pytest.approx(1.275, abs=1e-3)
+
+
+def test_forecast_pressure_raises_multiplier(setup):
+    bus, grid, stations = setup
+    grid.begin_tick(48)
+    stations["st-1"].send(
+        make_power_request("st-1", tick=48, demand_kw=40.0, forecast_kw=(90.0,))
+    )
+    stations["st-2"].send(make_power_request("st-2", tick=48, demand_kw=40.0))
+    bus.deliver()
+    grid.process_inbox()
+    multipliers = grid.compute_multipliers(grid.compute_allocation())
+    assert multipliers["st-1"] - multipliers["st-2"] == pytest.approx(0.2, abs=2e-3)

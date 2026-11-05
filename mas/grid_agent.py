@@ -9,6 +9,12 @@ from mas.allocation import (
 )
 from mas.bus import MessageBus
 from mas.messages import Message, PowerAllocation, PowerRequest, StorageOffer
+from mas.tariff import (
+    DEFAULT_MAX_MULT,
+    DEFAULT_MIN_MULT,
+    pressure_from_forecast,
+    tariff_multiplier,
+)
 
 GRID_ID = "grid"
 
@@ -19,15 +25,21 @@ class GridAgent(BaseAgent):
         bus: MessageBus,
         limit_kw: float,
         agent_id: str = GRID_ID,
-        min_share: float = MIN_SHARE,
+            min_share: float = MIN_SHARE,
+            tariff_min_mult: float = DEFAULT_MIN_MULT,
+            tariff_max_mult: float = DEFAULT_MAX_MULT,
     ) -> None:
         if limit_kw <= 0:
             raise ValueError("Лимит подстанции должен быть положительным")
         if not 0.0 <= min_share <= 1.0:
             raise ValueError("Гарантированная доля должна быть от 0 до 1")
+        if not 0 < tariff_min_mult < tariff_max_mult:
+            raise ValueError("Должно выполняться 0 < минимальный множитель < максимальный")
         super().__init__(agent_id, bus)
         self.limit_kw = limit_kw
         self.min_share = min_share
+        self.tariff_min_mult = tariff_min_mult
+        self.tariff_max_mult = tariff_max_mult
         self.current_tick = 0
         self._requests: dict[str, PowerRequest] = {}
         self._storage_offer: StorageOffer | None = None
@@ -102,8 +114,28 @@ class GridAgent(BaseAgent):
                 tariff_multiplier=multipliers.get(station, 1.0),
             ))
 
+    def compute_multipliers(self, result: AllocationResult) -> dict[str, float]:
+        """Тарифный множитель каждой станции: нагрузка, прогноз, недопоставка и время суток."""
+        total_demand = sum(r.demand_kw for r in self._requests.values())
+        network_ratio = total_demand / self.effective_limit_kw
+        multipliers = {}
+        for station, request in self._requests.items():
+            cap = min(request.demand_kw, request.max_power_kw)
+            allocated = result.allocated_kw.get(station, 0.0)
+            curtailment = 1.0 - allocated / cap if cap > 0 else 0.0
+            multipliers[station] = tariff_multiplier(
+                self.current_tick,
+                cap / request.max_power_kw,
+                network_ratio,
+                pressure_from_forecast(request.forecast_kw, request.max_power_kw),
+                curtailment,
+                self.tariff_min_mult,
+                self.tariff_max_mult,
+            )
+        return multipliers
+
     def run_allocation(self) -> AllocationResult:
-        """Рассчитывает распределение и рассылает его станциям."""
+        """Рассчитывает распределение и рассылает его станциям вместе с тарифными множителями."""
         result = self.compute_allocation()
-        self.send_allocations(result)
+        self.send_allocations(result, self.compute_multipliers(result))
         return result
