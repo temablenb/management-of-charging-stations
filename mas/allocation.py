@@ -9,6 +9,8 @@
 """
 from dataclasses import dataclass
 
+import pulp
+
 MIN_SHARE = 0.6
 EPS = 1e-9
 
@@ -47,6 +49,34 @@ def _validate(demands, max_powers, limit_kw, min_share, weights) -> None:
             raise ValueError("Веса станций должны быть положительными")
 
 
+def _solve_lp(caps, limit_kw, min_share, weights) -> dict[str, float]:
+    floors = {s: min_share * cap for s, cap in caps.items()}
+    if sum(floors.values()) > limit_kw + EPS:
+        raise AllocationInfeasible(
+            f"Гарантированный минимум {sum(floors.values()):.1f} кВт "
+            f"превышает лимит {limit_kw:.1f} кВт"
+        )
+
+    problem = pulp.LpProblem("PowerAllocation", pulp.LpMaximize)
+    power = {
+        station: pulp.LpVariable(f"P_{index}", lowBound=floors[station], upBound=caps[station])
+        for index, station in enumerate(caps)
+    }
+    weight = weights or {station: 1.0 for station in caps}
+    problem += pulp.lpSum(weight[station] * power[station] for station in caps)
+    problem += pulp.lpSum(power.values()) <= limit_kw, "SubstationLimit"
+    problem.solve(pulp.PULP_CBC_CMD(msg=False, timeLimit=10))
+
+    status = pulp.LpStatus[problem.status]
+    if status != "Optimal":
+        raise AllocationInfeasible(f"Решатель вернул статус {status}")
+
+    return {
+        station: round(min(max(power[station].value() or 0.0, floors[station]), caps[station]), 6)
+        for station in caps
+    }
+
+
 def allocate_power(
     demands: dict[str, float],
     max_powers: dict[str, float],
@@ -58,4 +88,5 @@ def allocate_power(
     caps = {s: min(demands[s], max_powers[s]) for s in demands}
     if sum(caps.values()) <= limit_kw + EPS:
         return AllocationResult(dict(caps), deficit=False)
-    raise NotImplementedError("Распределение при дефиците добавляется в следующем коммите")
+    allocated = _solve_lp(caps, limit_kw, min_share, weights)
+    return AllocationResult(allocated, deficit=True)
