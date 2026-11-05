@@ -1,6 +1,6 @@
 """Grid Agent: знает лимит подстанции и распределяет мощность между станциями."""
 from mas.agent import BaseAgent
-from mas.allocation import MIN_SHARE
+from mas.allocation import MIN_SHARE, AllocationResult, allocate_power
 from mas.bus import MessageBus
 from mas.messages import Message, PowerRequest
 
@@ -36,6 +36,12 @@ class GridAgent(BaseAgent):
             )
         # если станция прислала несколько запросов за такт, учитывается последний
         self._requests[message.sender] = message
+
+    def compute_allocation(self) -> AllocationResult:
+        """Делит лимит подстанции между станциями, приславшими запрос в этом такте."""
+        demands = {station: request.demand_kw for station, request in self._requests.items()}
+        max_powers = {station: request.max_power_kw for station, request in self._requests.items()}
+        return allocate_power(demands, max_powers, self.limit_kw, self.min_share)
 
     @property
     def requests(self) -> dict[str, PowerRequest]:
