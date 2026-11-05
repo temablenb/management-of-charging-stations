@@ -97,3 +97,19 @@ def test_storage_offer_rejects_soc_out_of_range():
             sender="storage", receiver="grid", tick=5,
             available_kw=20.0, soc=1.5,
         )
+
+
+def test_power_request_default_priority_is_one():
+    request = PowerRequest(
+        sender="st-1", receiver="grid", tick=5,
+        demand_kw=60.0, max_power_kw=100.0, forecast_kw=(),
+    )
+    assert request.priority == 1.0
+
+
+def test_power_request_rejects_non_positive_priority():
+    with pytest.raises(ValueError):
+        PowerRequest(
+            sender="st-1", receiver="grid", tick=5,
+            demand_kw=60.0, max_power_kw=100.0, forecast_kw=(), priority=0.0,
+        )

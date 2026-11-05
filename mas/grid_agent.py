@@ -51,8 +51,11 @@ class GridAgent(BaseAgent):
         """
         demands = {s: r.demand_kw for s, r in self._requests.items()}
         max_powers = {s: r.max_power_kw for s, r in self._requests.items()}
+        weights = {s: r.priority for s, r in self._requests.items()}
         try:
-            return allocate_power(demands, max_powers, self.limit_kw, self.min_share)
+            return allocate_power(
+                demands, max_powers, self.limit_kw, self.min_share, weights
+            )
         except AllocationInfeasible:
             return allocate_proportional(demands, max_powers, self.limit_kw)
 

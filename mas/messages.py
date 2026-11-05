@@ -71,12 +71,15 @@ class PowerRequest(Message):
     demand_kw: float
     max_power_kw: float
     forecast_kw: tuple[float, ...]
+    priority: float = 1.0
 
     def __post_init__(self):
         if self.demand_kw < 0:
             raise ValueError("Потребность не может быть отрицательной")
         if self.max_power_kw <= 0:
             raise ValueError("Максимальная мощность станции должна быть положительной")
+        if self.priority <= 0:
+            raise ValueError("Приоритет станции должен быть положительным")
 
     @property
     def type(self) -> MessageType:

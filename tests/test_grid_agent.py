@@ -6,10 +6,11 @@ from mas.grid_agent import GridAgent
 from mas.messages import ChargeRequest, PowerRequest
 
 
-def make_power_request(sender, tick=1, demand_kw=50.0, max_power_kw=100.0):
+def make_power_request(sender, tick=1, demand_kw=50.0, max_power_kw=100.0, priority=1.0):
     return PowerRequest(
         sender=sender, receiver="grid", tick=tick,
         demand_kw=demand_kw, max_power_kw=max_power_kw, forecast_kw=(),
+        priority=priority,
     )
 
 
@@ -134,3 +135,15 @@ def test_regular_allocation_is_not_fallback(setup):
     bus, grid, stations = setup
     run_requests(bus, grid, stations, {"st-1": 80.0, "st-2": 80.0})
     assert not grid.compute_allocation().fallback
+
+
+def test_higher_priority_station_gets_more_power(setup):
+    bus, grid, stations = setup
+    grid.begin_tick(1)
+    stations["st-1"].send(make_power_request("st-1", demand_kw=80.0, priority=2.0))
+    stations["st-2"].send(make_power_request("st-2", demand_kw=80.0, priority=1.0))
+    bus.deliver()
+    grid.process_inbox()
+    result = grid.compute_allocation()
+    assert result.allocated_kw["st-1"] == pytest.approx(52.0, abs=1e-5)
+    assert result.allocated_kw["st-2"] == pytest.approx(48.0, abs=1e-5)
