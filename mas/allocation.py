@@ -7,6 +7,7 @@
   - станция получает не меньше доли MIN_SHARE от своей потребности.
 Мощность в кВт.
 """
+import math
 from dataclasses import dataclass
 
 import pulp
@@ -25,6 +26,7 @@ class AllocationResult:
 
     allocated_kw: dict[str, float]
     deficit: bool
+    fallback: bool = False
 
     @property
     def total_kw(self) -> float:
@@ -90,3 +92,22 @@ def allocate_power(
         return AllocationResult(dict(caps), deficit=False)
     allocated = _solve_lp(caps, limit_kw, min_share, weights)
     return AllocationResult(allocated, deficit=True)
+
+
+def allocate_proportional(
+    demands: dict[str, float],
+    max_powers: dict[str, float],
+    limit_kw: float,
+) -> AllocationResult:
+    """Запасной вариант без решателя: при дефиците все станции урезаются в одной пропорции.
+
+    Работает всегда, даже если гарантированные минимумы не помещаются в лимит.
+    """
+    _validate(demands, max_powers, limit_kw, 0.0, None)
+    caps = {s: min(demands[s], max_powers[s]) for s in demands}
+    total = sum(caps.values())
+    if total <= limit_kw + EPS:
+        return AllocationResult(dict(caps), deficit=False, fallback=True)
+    scale = limit_kw / total
+    allocated = {s: math.floor(cap * scale * 1e6) / 1e6 for s, cap in caps.items()}
+    return AllocationResult(allocated, deficit=True, fallback=True)
