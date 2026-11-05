@@ -1,6 +1,6 @@
 import pytest
 
-from mas.allocation import AllocationInfeasible, allocate_power
+from mas.allocation import AllocationInfeasible, allocate_power, allocate_proportional
 
 LIMIT = 100.0
 
@@ -86,3 +86,46 @@ def test_non_positive_weight_rejected():
 def test_non_positive_max_power_rejected():
     with pytest.raises(ValueError):
         allocate_power({"a": 10.0}, {"a": 0.0}, 100.0)
+
+
+def test_proportional_without_deficit_returns_caps():
+    result = allocate_proportional({"a": 30.0, "b": 40.0}, {"a": 100.0, "b": 100.0}, 100.0)
+    assert result.allocated_kw == {"a": 30.0, "b": 40.0}
+    assert not result.deficit
+    assert result.fallback
+
+
+def test_proportional_scales_all_stations_equally():
+    result = allocate_proportional({"a": 100.0, "b": 50.0}, {"a": 100.0, "b": 100.0}, 90.0)
+    assert result.deficit
+    assert result.allocated_kw["a"] == pytest.approx(60.0, abs=1e-5)
+    assert result.allocated_kw["b"] == pytest.approx(30.0, abs=1e-5)
+
+
+def test_proportional_total_does_not_exceed_limit():
+    result = allocate_proportional(
+        {"a": 70.0, "b": 70.0, "c": 70.0}, {s: 100.0 for s in "abc"}, 100.0
+    )
+    assert result.total_kw <= 100.0
+    assert result.total_kw == pytest.approx(100.0, abs=1e-5)
+
+
+def test_proportional_respects_station_power():
+    result = allocate_proportional({"a": 150.0}, {"a": 80.0}, 200.0)
+    assert result.allocated_kw["a"] == 80.0
+
+
+def test_proportional_works_when_lp_is_infeasible():
+    result = allocate_proportional(
+        {"a": 100.0, "b": 100.0}, {"a": 100.0, "b": 100.0}, 100.0
+    )
+    assert result.total_kw == pytest.approx(100.0, abs=1e-5)
+
+
+def test_proportional_validates_input():
+    with pytest.raises(ValueError):
+        allocate_proportional({"a": -1.0}, {"a": 100.0}, 100.0)
+
+
+def test_lp_result_is_not_marked_as_fallback():
+    assert not alloc({"a": 80.0, "b": 80.0}).fallback
