@@ -1,7 +1,7 @@
 import pytest
 
 from mas.bus import MessageBus, UnknownAgentError
-from mas.messages import ChargeRequest
+from mas.messages import ChargeRequest, MessageType, PowerAllocation
 
 
 def make_request(sender="ev-1", receiver="st-1", tick=1):
@@ -9,6 +9,13 @@ def make_request(sender="ev-1", receiver="st-1", tick=1):
         sender=sender, receiver=receiver, tick=tick,
         energy_kwh=20.0, deadline_tick=tick + 10,
         max_power_kw=50.0, connector="CCS", prepaid=False,
+    )
+
+
+def make_allocation(sender="grid", receiver="st-1", tick=1):
+    return PowerAllocation(
+        sender=sender, receiver=receiver, tick=tick,
+        allocated_kw=40.0, tariff_multiplier=1.0,
     )
 
 
@@ -83,3 +90,87 @@ def test_receive_unknown_agent_raises(bus):
 
 def test_deliver_without_messages_returns_zero(bus):
     assert bus.deliver() == 0
+
+
+def fill_bus(bus):
+    bus.send(make_request(sender="ev-1", receiver="st-1", tick=1))
+    bus.send(make_request(sender="ev-2", receiver="st-1", tick=2))
+    bus.send(make_allocation(sender="grid", receiver="st-1", tick=3))
+    bus.send(make_request(sender="st-1", receiver="grid", tick=4))
+    bus.deliver()
+
+
+def test_journal_records_only_delivered_messages(bus):
+    bus.send(make_request())
+    assert bus.journal == ()
+    bus.deliver()
+    assert len(bus.journal) == 1
+
+
+def test_journal_entries_are_numbered_in_delivery_order(bus):
+    bus.send(make_request(sender="ev-1"))
+    bus.send(make_request(sender="ev-2"))
+    bus.deliver()
+    assert [entry.seq for entry in bus.journal] == [1, 2]
+    assert bus.journal[1].message.sender == "ev-2"
+
+
+def test_journal_is_kept_after_receive(bus):
+    bus.send(make_request())
+    bus.deliver()
+    bus.receive("st-1")
+    assert len(bus.journal) == 1
+
+
+def test_filter_by_sender(bus):
+    fill_bus(bus)
+    result = bus.filter_journal(sender="ev-1")
+    assert [e.message.sender for e in result] == ["ev-1"]
+
+
+def test_filter_by_receiver(bus):
+    fill_bus(bus)
+    result = bus.filter_journal(receiver="grid")
+    assert len(result) == 1
+    assert result[0].message.sender == "st-1"
+
+
+def test_filter_by_message_type(bus):
+    fill_bus(bus)
+    assert len(bus.filter_journal(message_type=MessageType.POWER_ALLOCATION)) == 1
+    assert len(bus.filter_journal(message_type=MessageType.CHARGE_REQUEST)) == 3
+
+
+def test_filter_by_tick_range_is_inclusive(bus):
+    fill_bus(bus)
+    result = bus.filter_journal(from_tick=2, to_tick=3)
+    assert [e.message.tick for e in result] == [2, 3]
+
+
+def test_filter_combines_conditions(bus):
+    fill_bus(bus)
+    result = bus.filter_journal(sender="grid", message_type=MessageType.CHARGE_REQUEST)
+    assert result == []
+
+
+def test_filter_without_conditions_returns_all(bus):
+    fill_bus(bus)
+    assert len(bus.filter_journal()) == 4
+
+
+def test_count_by_type(bus):
+    fill_bus(bus)
+    assert bus.count_by_type() == {
+        MessageType.CHARGE_REQUEST: 3,
+        MessageType.POWER_ALLOCATION: 1,
+    }
+
+
+def test_reset_clears_state_but_keeps_agents(bus):
+    fill_bus(bus)
+    bus.send(make_request())
+    bus.reset()
+    assert bus.journal == ()
+    assert bus.pending_count == 0
+    assert bus.receive("st-1") == []
+    assert bus.is_registered("st-1")
