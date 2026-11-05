@@ -1,0 +1,25 @@
+{
+  "name": "default",
+  "seed": 42,
+  "days": 7,
+  "substation_limit_kw": 420.0,
+  "base_tariff_rub": 10.0,
+  "tariff_min_mult": 0.7,
+  "tariff_max_mult": 1.6,
+  "ev_per_day": 120,
+  "stations": [
+    {"station_id": "st-1", "max_power_kw": 100.0, "connector": "CCS"},
+    {"station_id": "st-2", "max_power_kw": 95.0, "connector": "CCS"},
+    {"station_id": "st-3", "max_power_kw": 100.0, "connector": "CCS"},
+    {"station_id": "st-4", "max_power_kw": 90.0, "connector": "GB/T"},
+    {"station_id": "st-5", "max_power_kw": 100.0, "connector": "CCS"},
+    {"station_id": "st-6", "max_power_kw": 85.0, "connector": "GB/T"},
+    {"station_id": "st-7", "max_power_kw": 80.0, "connector": "CCS"}
+  ],
+  "storage": {
+    "capacity_kwh": 200.0,
+    "max_power_kw": 60.0,
+    "efficiency": 0.92,
+    "initial_soc": 0.5
+  }
+}
