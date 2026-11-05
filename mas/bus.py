@@ -1,5 +1,15 @@
 """Шина сообщений: доставка сообщений между агентами и журнал обмена."""
+from dataclasses import dataclass
+
 from mas.messages import Message
+
+
+@dataclass(frozen=True)
+class JournalEntry:
+    """Запись журнала: порядковый номер доставки и само сообщение."""
+
+    seq: int
+    message: Message
 
 
 class UnknownAgentError(KeyError):
@@ -10,6 +20,7 @@ class MessageBus:
     def __init__(self) -> None:
         self._inboxes: dict[str, list[Message]] = {}
         self._pending: list[Message] = []
+        self._journal: list[JournalEntry] = []
 
     def register(self, agent_id: str) -> None:
         if agent_id in self._inboxes:
@@ -35,6 +46,7 @@ class MessageBus:
         self._pending = []
         for message in delivered:
             self._inboxes[message.receiver].append(message)
+            self._journal.append(JournalEntry(len(self._journal) + 1, message))
         return len(delivered)
 
     def receive(self, agent_id: str) -> list[Message]:
@@ -48,3 +60,7 @@ class MessageBus:
     @property
     def pending_count(self) -> int:
         return len(self._pending)
+
+    @property
+    def journal(self) -> tuple[JournalEntry, ...]:
+        return tuple(self._journal)
