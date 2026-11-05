@@ -118,3 +118,19 @@ def test_compute_allocation_without_requests(setup):
     _, grid, _ = setup
     grid.begin_tick(1)
     assert grid.compute_allocation().allocated_kw == {}
+
+
+def test_infeasible_allocation_falls_back_to_proportional(setup):
+    bus, grid, stations = setup
+    # гарантированные минимумы 60 + 60 = 120 кВт больше лимита 100 кВт
+    run_requests(bus, grid, stations, {"st-1": 100.0, "st-2": 100.0})
+    result = grid.compute_allocation()
+    assert result.fallback
+    assert result.total_kw == pytest.approx(100.0, abs=1e-5)
+    assert result.allocated_kw["st-1"] == pytest.approx(50.0, abs=1e-5)
+
+
+def test_regular_allocation_is_not_fallback(setup):
+    bus, grid, stations = setup
+    run_requests(bus, grid, stations, {"st-1": 80.0, "st-2": 80.0})
+    assert not grid.compute_allocation().fallback
