@@ -295,3 +295,64 @@ def test_forecast_pressure_raises_multiplier(setup):
     grid.process_inbox()
     multipliers = grid.compute_multipliers(grid.compute_allocation())
     assert multipliers["st-1"] - multipliers["st-2"] == pytest.approx(0.2, abs=2e-3)
+
+
+def test_decisions_empty_initially(setup):
+    _, grid, _ = setup
+    assert grid.decisions == ()
+
+
+def test_run_allocation_records_decision(setup):
+    bus, grid, stations = setup
+    run_requests(bus, grid, stations, {"st-1": 30.0, "st-2": 40.0})
+    grid.run_allocation()
+    (decision,) = grid.decisions
+    assert decision.tick == 1
+    assert decision.requested_kw == 70.0
+    assert decision.total_allocated_kw == 70.0
+    assert decision.allocated_kw == {"st-1": 30.0, "st-2": 40.0}
+    assert set(decision.multipliers) == {"st-1", "st-2"}
+    assert not decision.deficit
+    assert not decision.fallback
+    assert decision.storage_used_kw == 0.0
+
+
+def test_decision_records_storage_usage(setup, storage):
+    bus, grid, stations = setup
+    grid.begin_tick(1)
+    stations["st-1"].send(make_power_request("st-1", demand_kw=80.0))
+    stations["st-2"].send(make_power_request("st-2", demand_kw=80.0))
+    storage.send(make_offer(available_kw=60.0))
+    bus.deliver()
+    grid.process_inbox()
+    grid.run_allocation()
+    decision = grid.decisions[0]
+    assert decision.storage_kw == 60.0
+    assert decision.total_allocated_kw == 160.0
+    assert decision.storage_used_kw == pytest.approx(60.0)
+
+
+def test_decision_records_fallback(setup):
+    bus, grid, stations = setup
+    run_requests(bus, grid, stations, {"st-1": 100.0, "st-2": 100.0})
+    grid.run_allocation()
+    decision = grid.decisions[0]
+    assert decision.deficit
+    assert decision.fallback
+
+
+def test_decisions_accumulate_across_ticks(setup):
+    bus, grid, stations = setup
+    for tick in (1, 2, 3):
+        run_requests(bus, grid, stations, {"st-1": 30.0}, tick=tick)
+        grid.run_allocation()
+    assert [decision.tick for decision in grid.decisions] == [1, 2, 3]
+
+
+def test_decision_without_requests_is_empty(setup):
+    _, grid, _ = setup
+    grid.begin_tick(5)
+    grid.run_allocation()
+    (decision,) = grid.decisions
+    assert decision.requested_kw == 0.0
+    assert decision.allocated_kw == {}

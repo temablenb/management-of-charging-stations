@@ -1,4 +1,5 @@
 """Grid Agent: знает лимит подстанции и распределяет мощность между станциями."""
+from dataclasses import dataclass
 from mas.agent import BaseAgent
 from mas.allocation import (
     MIN_SHARE,
@@ -17,6 +18,30 @@ from mas.tariff import (
 )
 
 GRID_ID = "grid"
+
+
+@dataclass(frozen=True)
+class GridDecision:
+    """Решение Grid Agent за один такт (для журнала и визуализации)."""
+
+    tick: int
+    substation_limit_kw: float
+    storage_kw: float
+    requested_kw: float
+    allocated_kw: dict[str, float]
+    multipliers: dict[str, float]
+    deficit: bool
+    fallback: bool
+
+    @property
+    def total_allocated_kw(self) -> float:
+        return sum(self.allocated_kw.values())
+
+    @property
+    def storage_used_kw(self) -> float:
+        """Часть мощности, которую покрыл накопитель сверх лимита подстанции."""
+        excess = max(0.0, self.total_allocated_kw - self.substation_limit_kw)
+        return min(self.storage_kw, excess)
 
 
 class GridAgent(BaseAgent):
@@ -43,6 +68,7 @@ class GridAgent(BaseAgent):
         self.current_tick = 0
         self._requests: dict[str, PowerRequest] = {}
         self._storage_offer: StorageOffer | None = None
+        self._decisions: list[GridDecision] = []
 
     def handle(self, message: Message) -> None:
         if isinstance(message, (PowerRequest, StorageOffer)) and message.tick != self.current_tick:
@@ -74,6 +100,11 @@ class GridAgent(BaseAgent):
             )
         except AllocationInfeasible:
             return allocate_proportional(demands, max_powers, limit_kw)
+
+    @property
+    def decisions(self) -> tuple[GridDecision, ...]:
+        """Журнал решений по тактам."""
+        return tuple(self._decisions)
 
     @property
     def requests(self) -> dict[str, PowerRequest]:
@@ -135,7 +166,21 @@ class GridAgent(BaseAgent):
         return multipliers
 
     def run_allocation(self) -> AllocationResult:
-        """Рассчитывает распределение и рассылает его станциям вместе с тарифными множителями."""
+        """Рассчитывает распределение, рассылает его станциям и пишет решение в журнал.
+
+        Вызывается один раз за такт, когда все запросы уже получены.
+        """
         result = self.compute_allocation()
-        self.send_allocations(result, self.compute_multipliers(result))
+        multipliers = self.compute_multipliers(result)
+        self.send_allocations(result, multipliers)
+        self._decisions.append(GridDecision(
+            tick=self.current_tick,
+            substation_limit_kw=self.limit_kw,
+            storage_kw=self.storage_kw,
+            requested_kw=sum(r.demand_kw for r in self._requests.values()),
+            allocated_kw=dict(result.allocated_kw),
+            multipliers=multipliers,
+            deficit=result.deficit,
+            fallback=result.fallback,
+        ))
         return result
