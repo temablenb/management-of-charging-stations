@@ -1,7 +1,7 @@
 """Шина сообщений: доставка сообщений между агентами и журнал обмена."""
 from dataclasses import dataclass
 
-from mas.messages import Message
+from mas.messages import Message, MessageType
 
 
 @dataclass(frozen=True)
@@ -56,6 +56,32 @@ class MessageBus:
         messages = self._inboxes[agent_id]
         self._inboxes[agent_id] = []
         return messages
+
+    def filter_journal(
+        self,
+        *,
+        sender: str | None = None,
+        receiver: str | None = None,
+        message_type: MessageType | None = None,
+        from_tick: int | None = None,
+        to_tick: int | None = None,
+    ) -> list[JournalEntry]:
+        """Записи журнала, удовлетворяющие всем заданным условиям."""
+        result = []
+        for entry in self._journal:
+            message = entry.message
+            if sender is not None and message.sender != sender:
+                continue
+            if receiver is not None and message.receiver != receiver:
+                continue
+            if message_type is not None and message.type != message_type:
+                continue
+            if from_tick is not None and message.tick < from_tick:
+                continue
+            if to_tick is not None and message.tick > to_tick:
+                continue
+            result.append(entry)
+        return result
 
     @property
     def pending_count(self) -> int:
