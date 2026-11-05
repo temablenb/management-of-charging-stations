@@ -8,7 +8,7 @@ from mas.allocation import (
     allocate_proportional,
 )
 from mas.bus import MessageBus
-from mas.messages import Message, PowerRequest, StorageOffer
+from mas.messages import Message, PowerAllocation, PowerRequest, StorageOffer
 
 GRID_ID = "grid"
 
@@ -82,3 +82,28 @@ class GridAgent(BaseAgent):
         self.current_tick = tick
         self._requests.clear()
         self._storage_offer = None
+
+    def send_allocations(
+        self,
+        result: AllocationResult,
+        multipliers: dict[str, float] | None = None,
+    ) -> None:
+        """Отправляет каждой станции выделенную мощность и тарифный множитель.
+
+        Если множитель станции не задан, используется 1.0 (базовый тариф).
+        """
+        multipliers = multipliers or {}
+        for station, power in result.allocated_kw.items():
+            self.send(PowerAllocation(
+                sender=self.agent_id,
+                receiver=station,
+                tick=self.current_tick,
+                allocated_kw=power,
+                tariff_multiplier=multipliers.get(station, 1.0),
+            ))
+
+    def run_allocation(self) -> AllocationResult:
+        """Рассчитывает распределение и рассылает его станциям."""
+        result = self.compute_allocation()
+        self.send_allocations(result)
+        return result

@@ -3,7 +3,7 @@ import pytest
 from mas.agent import BaseAgent
 from mas.bus import MessageBus
 from mas.grid_agent import GridAgent
-from mas.messages import ChargeRequest, PowerRequest, StorageOffer
+from mas.messages import ChargeRequest, MessageType, PowerRequest, StorageOffer
 
 
 def make_power_request(sender, tick=1, demand_kw=50.0, max_power_kw=100.0, priority=1.0):
@@ -209,3 +209,41 @@ def test_storage_reserve_removes_deficit(setup, storage):
     result = grid.compute_allocation()
     assert not result.deficit
     assert result.allocated_kw == {"st-1": 80.0, "st-2": 80.0}
+
+
+def test_run_allocation_sends_power_to_stations(setup):
+    bus, grid, stations = setup
+    run_requests(bus, grid, stations, {"st-1": 30.0, "st-2": 40.0})
+    grid.run_allocation()
+    bus.deliver()
+    for station_id, expected in (("st-1", 30.0), ("st-2", 40.0)):
+        (message,) = bus.receive(station_id)
+        assert message.type == MessageType.POWER_ALLOCATION
+        assert message.sender == "grid"
+        assert message.tick == 1
+        assert message.allocated_kw == expected
+        assert message.tariff_multiplier == 1.0
+
+
+def test_custom_multipliers_are_sent(setup):
+    bus, grid, stations = setup
+    run_requests(bus, grid, stations, {"st-1": 30.0, "st-2": 40.0})
+    grid.send_allocations(grid.compute_allocation(), {"st-1": 1.3})
+    bus.deliver()
+    assert bus.receive("st-1")[0].tariff_multiplier == 1.3
+    assert bus.receive("st-2")[0].tariff_multiplier == 1.0
+
+
+def test_allocation_sent_only_to_requesting_stations(setup):
+    bus, grid, stations = setup
+    run_requests(bus, grid, stations, {"st-1": 30.0})
+    grid.run_allocation()
+    bus.deliver()
+    assert len(bus.receive("st-1")) == 1
+    assert bus.receive("st-2") == []
+
+
+def test_run_allocation_returns_computed_result(setup):
+    bus, grid, stations = setup
+    run_requests(bus, grid, stations, {"st-1": 30.0})
+    assert grid.run_allocation().allocated_kw == {"st-1": 30.0}
