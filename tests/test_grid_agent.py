@@ -3,7 +3,7 @@ import pytest
 from mas.agent import BaseAgent
 from mas.bus import MessageBus
 from mas.grid_agent import GridAgent
-from mas.messages import ChargeRequest, PowerRequest
+from mas.messages import ChargeRequest, PowerRequest, StorageOffer
 
 
 def make_power_request(sender, tick=1, demand_kw=50.0, max_power_kw=100.0, priority=1.0):
@@ -147,3 +147,65 @@ def test_higher_priority_station_gets_more_power(setup):
     result = grid.compute_allocation()
     assert result.allocated_kw["st-1"] == pytest.approx(52.0, abs=1e-5)
     assert result.allocated_kw["st-2"] == pytest.approx(48.0, abs=1e-5)
+
+
+@pytest.fixture
+def storage(setup):
+    bus, _, _ = setup
+    return BaseAgent("storage", bus)
+
+
+def make_offer(tick=1, available_kw=20.0):
+    return StorageOffer(
+        sender="storage", receiver="grid", tick=tick,
+        available_kw=available_kw, soc=0.5,
+    )
+
+
+def test_storage_offer_extends_effective_limit(setup, storage):
+    bus, grid, _ = setup
+    grid.begin_tick(1)
+    storage.send(make_offer(available_kw=20.0))
+    bus.deliver()
+    grid.process_inbox()
+    assert grid.storage_kw == 20.0
+    assert grid.effective_limit_kw == 120.0
+
+
+def test_without_offer_limit_is_substation_limit(setup):
+    _, grid, _ = setup
+    grid.begin_tick(1)
+    assert grid.storage_kw == 0.0
+    assert grid.effective_limit_kw == 100.0
+
+
+def test_begin_tick_clears_storage_offer(setup, storage):
+    bus, grid, _ = setup
+    grid.begin_tick(1)
+    storage.send(make_offer())
+    bus.deliver()
+    grid.process_inbox()
+    grid.begin_tick(2)
+    assert grid.storage_kw == 0.0
+
+
+def test_storage_offer_from_other_tick_rejected(setup, storage):
+    bus, grid, _ = setup
+    grid.begin_tick(2)
+    storage.send(make_offer(tick=1))
+    bus.deliver()
+    with pytest.raises(ValueError):
+        grid.process_inbox()
+
+
+def test_storage_reserve_removes_deficit(setup, storage):
+    bus, grid, stations = setup
+    grid.begin_tick(1)
+    stations["st-1"].send(make_power_request("st-1", demand_kw=80.0))
+    stations["st-2"].send(make_power_request("st-2", demand_kw=80.0))
+    storage.send(make_offer(available_kw=60.0))
+    bus.deliver()
+    grid.process_inbox()
+    result = grid.compute_allocation()
+    assert not result.deficit
+    assert result.allocated_kw == {"st-1": 80.0, "st-2": 80.0}
