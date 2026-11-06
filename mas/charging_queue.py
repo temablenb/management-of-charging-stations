@@ -97,3 +97,15 @@ class ChargingQueue:
         if ev_id in self._waiting:
             return self._waiting.pop(ev_id)
         raise KeyError(ev_id)
+
+    def admit(self, tick: int) -> list[Order]:
+        """Переводит ожидающих на свободные места по приоритету, возвращает принятых."""
+        admitted = []
+        for order in self.waiting(tick):
+            if self.free_slots <= 0:
+                break
+            del self._waiting[order.ev_id]
+            order.start_tick = tick
+            self._active[order.ev_id] = order
+            admitted.append(order)
+        return admitted
