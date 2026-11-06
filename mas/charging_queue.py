@@ -4,6 +4,9 @@ from dataclasses import dataclass
 from mas.messages import ChargeRequest
 
 
+PREPAID_BONUS_TICKS = 8
+
+
 @dataclass
 class Order:
     """Заявка автомобиля в очереди станции (изменяемая: убывает remaining_kwh)."""
@@ -28,3 +31,14 @@ class Order:
             prepaid=request.prepaid,
             remaining_kwh=request.energy_kwh,
         )
+
+
+def waiting_ticks(order: Order, tick: int) -> int:
+    """Сколько тактов заявка ждёт с момента подачи."""
+    return max(0, tick - order.arrival_tick)
+
+
+def priority_score(order: Order, tick: int) -> int:
+    """Балл приоритета: время ожидания плюс бонус предоплаты. Чем больше, тем раньше."""
+    bonus = PREPAID_BONUS_TICKS if order.prepaid else 0
+    return waiting_ticks(order, tick) + bonus
