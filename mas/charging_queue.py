@@ -19,6 +19,8 @@ class Order:
     prepaid: bool
     remaining_kwh: float
     start_tick: int | None = None
+    finish_tick: int | None = None
+    cost_rub: float = 0.0
 
     @classmethod
     def from_request(cls, request: ChargeRequest) -> "Order":

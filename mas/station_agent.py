@@ -1,9 +1,16 @@
 """Station Agent: управляет одной станцией, принимает заявки и ведёт очередь."""
 from mas.agent import BaseAgent
 from mas.bus import MessageBus
+from mas.charging_plan import (
+    EPS,
+    build_schedule,
+    energy_per_tick,
+    expected_finish_tick,
+    split_power,
+)
 from mas.charging_queue import ChargingQueue, Order
 from mas.grid_agent import GRID_ID
-from mas.messages import ChargeRequest, Message
+from mas.messages import ChargePlan, ChargeRequest, Message
 from mas.scenario import StationConfig
 
 REJECT_CONNECTOR = "connector_mismatch"
@@ -25,6 +32,9 @@ class StationAgent(BaseAgent):
         # отказы: пары (идентификатор автомобиля, причина); отдельного сообщения-отказа нет,
         # автомобиль заранее выбирает станцию с подходящим разъёмом
         self.rejected: list[tuple[str, str]] = []
+        self.last_powers: dict[str, float] = {}
+        self.delivered_kwh = 0.0
+        self.completed: list[Order] = []
 
     @property
     def max_power_kw(self) -> float:
@@ -64,3 +74,56 @@ class StationAgent(BaseAgent):
             self.rejected.append((request.sender, REJECT_DUPLICATE))
             return
         self.queue.add(Order.from_request(request))
+
+    def allocate(self, available_kw: float) -> dict[str, float]:
+        """Делит доступную мощность между заряжающимися автомобилями."""
+        available_kw = min(available_kw, self.config.max_power_kw)
+        self.last_powers = split_power(self.queue.active, available_kw)
+        return dict(self.last_powers)
+
+    def make_plans(self, available_kw: float) -> list[ChargePlan]:
+        """Планы для всех автомобилей станции: заряжающиеся получают расписание, ждущие нет."""
+        powers = self.allocate(available_kw)
+        plans = []
+        for order in self.queue.active:
+            power = powers[order.ev_id]
+            plans.append(ChargePlan(
+                sender=self.agent_id, receiver=order.ev_id, tick=self.current_tick,
+                schedule_kw=build_schedule(order.remaining_kwh, power),
+                expected_finish_tick=expected_finish_tick(
+                    order.remaining_kwh, power, self.current_tick
+                ),
+                queue_position=0,
+            ))
+        for order in self.queue.waiting(self.current_tick):
+            plans.append(ChargePlan(
+                sender=self.agent_id, receiver=order.ev_id, tick=self.current_tick,
+                schedule_kw=(), expected_finish_tick=None,
+                queue_position=self.queue.position(order.ev_id, self.current_tick),
+            ))
+        return plans
+
+    def send_plans(self, available_kw: float) -> list[ChargePlan]:
+        plans = self.make_plans(available_kw)
+        for plan in plans:
+            self.send(plan)
+        return plans
+
+    def advance(self, powers: dict[str, float] | None = None,
+                price_per_kwh: float = 0.0) -> list[Order]:
+        """Один такт зарядки: списывает энергию, начисляет стоимость, убирает завершивших."""
+        powers = self.last_powers if powers is None else powers
+        completed = []
+        for order in self.queue.active:
+            energy = min(energy_per_tick(powers.get(order.ev_id, 0.0)), order.remaining_kwh)
+            order.remaining_kwh = max(0.0, order.remaining_kwh - energy)
+            order.cost_rub += energy * price_per_kwh
+            self.delivered_kwh += energy
+            if order.remaining_kwh <= EPS:
+                order.remaining_kwh = 0.0
+                order.finish_tick = self.current_tick + 1
+                completed.append(order)
+        for order in completed:
+            self.queue.remove(order.ev_id)
+            self.completed.append(order)
+        return completed

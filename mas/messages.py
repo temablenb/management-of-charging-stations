@@ -56,7 +56,7 @@ class ChargePlan(Message):
     """План станции для автомобиля: мощность по тактам и место в очереди."""
 
     schedule_kw: tuple[float, ...]
-    expected_finish_tick: int
+    expected_finish_tick: int | None
     queue_position: int
 
     @property
