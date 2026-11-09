@@ -79,3 +79,23 @@ def build_schedule(
     last_kw = (remaining_kwh - energy_per_tick(power_kw) * (ticks - 1)) / TICK_HOURS
     schedule = [power_kw] * (ticks - 1) + [min(last_kw, power_kw)]
     return tuple(round(value, 6) for value in schedule[:horizon])
+
+
+def meets_deadline(finish_tick: int | None, deadline_tick: int) -> bool:
+    """Успевает ли зарядка завершиться к дедлайну (завершение в такт дедлайна допустимо)."""
+    return finish_tick is not None and finish_tick <= deadline_tick
+
+
+def slack_ticks(finish_tick: int | None, deadline_tick: int) -> int | None:
+    """Запас до дедлайна в тактах (отрицательный, если опаздывает; None без мощности)."""
+    return None if finish_tick is None else deadline_tick - finish_tick
+
+
+def required_power_kw(remaining_kwh: float, tick: int, deadline_tick: int) -> float:
+    """Постоянная мощность, нужная чтобы закончить к дедлайну (inf, если время уже вышло)."""
+    if remaining_kwh <= EPS:
+        return 0.0
+    ticks_left = deadline_tick - tick
+    if ticks_left <= 0:
+        return math.inf
+    return remaining_kwh / (ticks_left * TICK_HOURS)
