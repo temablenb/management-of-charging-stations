@@ -47,3 +47,35 @@ def split_power(orders, available_kw: float) -> dict[str, float]:
                 result[ev_id] = rounded
             break
     return result
+
+
+
+
+def ticks_to_finish(remaining_kwh: float, power_kw: float) -> int | None:
+    """Сколько тактов нужно до конца зарядки при постоянной мощности.
+
+    0, если энергия уже получена; None, если мощности нет, а энергия ещё нужна.
+    """
+    if remaining_kwh <= EPS:
+        return 0
+    if power_kw <= EPS:
+        return None
+    return math.ceil(remaining_kwh / energy_per_tick(power_kw) - EPS)
+
+
+def expected_finish_tick(remaining_kwh: float, power_kw: float, tick: int) -> int | None:
+    """Номер такта, в начале которого зарядка будет завершена (None, если мощности нет)."""
+    ticks = ticks_to_finish(remaining_kwh, power_kw)
+    return None if ticks is None else tick + ticks
+
+
+def build_schedule(
+    remaining_kwh: float, power_kw: float, horizon: int = PLAN_HORIZON
+) -> tuple[float, ...]:
+    """Мощность по тактам: постоянная, в последнем такте ровно столько, сколько осталось."""
+    ticks = ticks_to_finish(remaining_kwh, power_kw)
+    if not ticks:
+        return ()
+    last_kw = (remaining_kwh - energy_per_tick(power_kw) * (ticks - 1)) / TICK_HOURS
+    schedule = [power_kw] * (ticks - 1) + [min(last_kw, power_kw)]
+    return tuple(round(value, 6) for value in schedule[:horizon])
