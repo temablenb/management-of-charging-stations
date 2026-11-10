@@ -4,6 +4,9 @@ from enum import Enum
 
 import numpy as np
 
+from mas.agent import BaseAgent
+from mas.bus import MessageBus
+from mas.messages import ChargeRequest
 
 class EVState(str, Enum):
     PENDING = "pending"          # ещё не подал заявку
@@ -67,3 +70,70 @@ def choose_station(
     if not compatible:
         return None
     return compatible[int(rng.integers(len(compatible)))]
+
+
+class EVAgent(BaseAgent):
+    def __init__(
+        self,
+        bus: MessageBus,
+        profile: EVProfile,
+        stations,
+        rng: np.random.Generator,
+    ) -> None:
+        super().__init__(profile.ev_id, bus)
+        self.profile = profile
+        self.stations = tuple(stations)
+        self.rng = rng
+        self.state = EVState.PENDING
+        self.current_tick = 0
+        self.station_id: str | None = None
+        self.request_tick: int | None = None
+        self.queue_position: int | None = None
+        self.expected_finish_tick: int | None = None
+        self.soc = profile.soc
+        self.delivered_kwh = 0.0
+        self.cost_rub = 0.0
+        self.finish_tick: int | None = None
+
+    @property
+    def finished(self) -> bool:
+        return self.state in (EVState.DONE, EVState.MISSED, EVState.NO_STATION)
+
+    @property
+    def deadline_met(self) -> bool:
+        return (
+            self.state == EVState.DONE
+            and self.finish_tick is not None
+            and self.finish_tick <= self.profile.deadline_tick
+        )
+
+    def begin_tick(self, tick: int) -> None:
+        self.current_tick = tick
+        if self.finished:
+            return
+        if self.state == EVState.PENDING:
+            if tick >= self.profile.deadline_tick:
+                self.state = EVState.MISSED  # приехал слишком поздно, подавать заявку нет смысла
+            elif tick >= self.profile.arrival_tick:
+                self._send_request(tick)
+        elif tick > self.profile.deadline_tick:
+            self.state = EVState.MISSED
+
+    def _send_request(self, tick: int) -> None:
+        station = choose_station(self.stations, self.profile.connector, self.rng)
+        if station is None:
+            self.state = EVState.NO_STATION
+            return
+        self.station_id = station.station_id
+        self.request_tick = tick
+        self.send(ChargeRequest(
+            sender=self.agent_id,
+            receiver=station.station_id,
+            tick=tick,
+            energy_kwh=self.profile.needed_kwh,
+            deadline_tick=self.profile.deadline_tick,
+            max_power_kw=self.profile.max_charge_kw,
+            connector=self.profile.connector,
+            prepaid=self.profile.prepaid,
+        ))
+        self.state = EVState.REQUESTED
