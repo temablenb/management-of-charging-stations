@@ -6,6 +6,7 @@ from mas.charging_plan import (
     build_schedule,
     energy_per_tick,
     expected_finish_tick,
+    max_useful_power,
     split_power,
 )
 from mas.charging_queue import ChargingQueue, Order
@@ -21,11 +22,14 @@ REJECT_DUPLICATE = "duplicate"
 
 class StationAgent(BaseAgent):
     def __init__(
-        self,
-        bus: MessageBus,
-        config: StationConfig,
-        grid_id: str = GRID_ID,
+            self,
+            bus: MessageBus,
+            config: StationConfig,
+            grid_id: str = GRID_ID,
+            base_tariff_rub: float = 10.0,
     ) -> None:
+        if base_tariff_rub <= 0:
+            raise ValueError("Базовый тариф должен быть положительным")
         super().__init__(config.station_id, bus)
         self.config = config
         self.grid_id = grid_id
@@ -37,6 +41,8 @@ class StationAgent(BaseAgent):
         self.last_powers: dict[str, float] = {}
         self.delivered_kwh = 0.0
         self.completed: list[Order] = []
+        self.base_tariff_rub = base_tariff_rub
+        self.tariff_multiplier = 1.0
         self.hourly_history: list[float] = []
         self._hour_buffer: list[float] = []
 
@@ -161,3 +167,17 @@ class StationAgent(BaseAgent):
     def forecast_peak_hours(self, forecast: tuple[float, ...]) -> tuple[int, ...]:
         """Часы суток, в которые ожидается пик нагрузки по переданному прогнозу."""
         return peak_hours(forecast, hour_of_tick(self.current_tick))
+
+    @property
+    def price_per_kwh(self) -> float:
+        """Текущая цена, руб/кВт·ч: базовый тариф на множитель от Grid Agent."""
+        return self.base_tariff_rub * self.tariff_multiplier
+
+    def station_priority(self) -> float:
+        """Вес станции для Grid Agent: от 1 (очереди нет) до 2 (очередь не меньше числа мест)."""
+        return 1.0 + min(1.0, self.queue.waiting_count / self.config.slots)
+
+    def demand_kw(self) -> float:
+        """Потребность станции: сумма полезных мощностей заряжающихся, но не больше мощности станции."""
+        total = sum(max_useful_power(order) for order in self.queue.active)
+        return min(total, self.config.max_power_kw)
