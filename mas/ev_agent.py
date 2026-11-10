@@ -2,6 +2,8 @@
 from dataclasses import dataclass
 from enum import Enum
 
+import numpy as np
+
 
 class EVState(str, Enum):
     PENDING = "pending"          # ещё не подал заявку
@@ -43,3 +45,25 @@ class EVProfile:
     def needed_kwh(self) -> float:
         """Сколько энергии нужно, чтобы довести заряд до целевого."""
         return self.battery_kwh * (self.target_soc - self.soc)
+
+
+@dataclass(frozen=True)
+class StationInfo:
+    """Что автомобиль знает о станции заранее: разъём и мощность."""
+
+    station_id: str
+    connector: str
+    max_power_kw: float
+
+
+def choose_station(
+    stations, connector: str, rng: np.random.Generator
+) -> StationInfo | None:
+    """Случайная (по seed) станция с подходящим разъёмом; None, если таких нет."""
+    compatible = sorted(
+        (station for station in stations if station.connector == connector),
+        key=lambda station: station.station_id,
+    )
+    if not compatible:
+        return None
+    return compatible[int(rng.integers(len(compatible)))]
