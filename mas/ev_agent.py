@@ -6,7 +6,7 @@ import numpy as np
 
 from mas.agent import BaseAgent
 from mas.bus import MessageBus
-from mas.messages import ChargeRequest
+from mas.messages import ChargePlan, ChargeRequest, Message
 
 class EVState(str, Enum):
     PENDING = "pending"          # ещё не подал заявку
@@ -137,3 +137,16 @@ class EVAgent(BaseAgent):
             prepaid=self.profile.prepaid,
         ))
         self.state = EVState.REQUESTED
+
+    def handle(self, message: Message) -> None:
+        if isinstance(message, ChargePlan):
+            self._apply_plan(message)
+        else:
+            super().handle(message)
+
+    def _apply_plan(self, plan: ChargePlan) -> None:
+        if self.finished:
+            return
+        self.queue_position = plan.queue_position
+        self.expected_finish_tick = plan.expected_finish_tick
+        self.state = EVState.CHARGING if plan.queue_position == 0 else EVState.QUEUED
