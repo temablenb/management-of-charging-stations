@@ -13,7 +13,13 @@ from mas.charging_queue import ChargingQueue, Order
 from mas.clock import TICKS_PER_HOUR, hour_of_tick
 from mas.forecast import DEFAULT_HORIZON, forecast_load, peak_hours
 from mas.grid_agent import GRID_ID
-from mas.messages import ChargePlan, ChargeRequest, Message, PowerRequest
+from mas.messages import (
+    ChargePlan,
+    ChargeRequest,
+    Message,
+    PowerAllocation,
+    PowerRequest,
+)
 from mas.scenario import StationConfig
 
 REJECT_CONNECTOR = "connector_mismatch"
@@ -43,6 +49,7 @@ class StationAgent(BaseAgent):
         self.completed: list[Order] = []
         self.base_tariff_rub = base_tariff_rub
         self.tariff_multiplier = 1.0
+        self.expired: list[Order] = []
         self.hourly_history: list[float] = []
         self._hour_buffer: list[float] = []
 
@@ -56,11 +63,15 @@ class StationAgent(BaseAgent):
 
     def begin_tick(self, tick: int) -> None:
         self.current_tick = tick
+        self.last_powers = {}
+        self.expire_orders(tick)
         self.queue.admit(tick)
 
     def handle(self, message: Message) -> None:
         if isinstance(message, ChargeRequest):
             self._accept(message)
+        elif isinstance(message, PowerAllocation):
+            self._apply_allocation(message)
         else:
             super().handle(message)
 
@@ -195,3 +206,30 @@ class StationAgent(BaseAgent):
         )
         self.send(request)
         return request
+
+    def _apply_allocation(self, allocation: PowerAllocation) -> None:
+        if allocation.tick != self.current_tick:
+            raise ValueError(
+                f"Выделение относится к такту {allocation.tick}, "
+                f"а текущий такт {self.current_tick}"
+            )
+        self.tariff_multiplier = allocation.tariff_multiplier
+        self.send_plans(allocation.allocated_kw)
+
+    def expire_orders(self, tick: int) -> list[Order]:
+        """Убирает заявки, у которых наступил дедлайн: автомобиль уезжает недозаряженным."""
+        expired = [
+            order
+            for order in list(self.queue.active) + self.queue.waiting(tick)
+            if order.deadline_tick <= tick
+        ]
+        for order in expired:
+            self.queue.remove(order.ev_id)
+        self.expired.extend(expired)
+        return expired
+
+    def end_tick(self, tick: int) -> None:
+        """Конец такта: записывает нагрузку в историю и проводит зарядку по выделенной мощности."""
+        self.record_load(tick, sum(self.last_powers.values()))
+        self.advance(self.last_powers, self.price_per_kwh)
+        self.last_powers = {}
