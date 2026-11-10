@@ -13,7 +13,7 @@ from mas.charging_queue import ChargingQueue, Order
 from mas.clock import TICKS_PER_HOUR, hour_of_tick
 from mas.forecast import DEFAULT_HORIZON, forecast_load, peak_hours
 from mas.grid_agent import GRID_ID
-from mas.messages import ChargePlan, ChargeRequest, Message
+from mas.messages import ChargePlan, ChargeRequest, Message, PowerRequest
 from mas.scenario import StationConfig
 
 REJECT_CONNECTOR = "connector_mismatch"
@@ -181,3 +181,17 @@ class StationAgent(BaseAgent):
         """Потребность станции: сумма полезных мощностей заряжающихся, но не больше мощности станции."""
         total = sum(max_useful_power(order) for order in self.queue.active)
         return min(total, self.config.max_power_kw)
+
+    def send_power_request(self, forecast_horizon: int = DEFAULT_HORIZON) -> PowerRequest:
+        """Отправляет Grid Agent потребность, прогноз нагрузки и приоритет станции."""
+        request = PowerRequest(
+            sender=self.agent_id,
+            receiver=self.grid_id,
+            tick=self.current_tick,
+            demand_kw=self.demand_kw(),
+            max_power_kw=self.config.max_power_kw,
+            forecast_kw=self.build_forecast(forecast_horizon),
+            priority=self.station_priority(),
+        )
+        self.send(request)
+        return request
