@@ -96,3 +96,18 @@ def forecast_load(
     upper = np.inf if max_power_kw is None else max_power_kw
     values = np.clip(values, 0.0, upper)
     return tuple(round(float(value), 3) for value in values)
+
+
+def peak_hours(
+    forecast, start_hour: int, factor: float = PEAK_FACTOR
+) -> tuple[int, ...]:
+    """Часы суток (0–23), в которые прогноз выше среднего в factor раз."""
+    if not forecast:
+        return ()
+    mean = sum(forecast) / len(forecast)
+    hours = {
+        (start_hour + step) % 24
+        for step, value in enumerate(forecast)
+        if value > mean * factor
+    }
+    return tuple(sorted(hours))

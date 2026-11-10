@@ -9,7 +9,8 @@ from mas.charging_plan import (
     split_power,
 )
 from mas.charging_queue import ChargingQueue, Order
-from mas.clock import TICKS_PER_HOUR
+from mas.clock import TICKS_PER_HOUR, hour_of_tick
+from mas.forecast import DEFAULT_HORIZON, forecast_load, peak_hours
 from mas.grid_agent import GRID_ID
 from mas.messages import ChargePlan, ChargeRequest, Message
 from mas.scenario import StationConfig
@@ -149,3 +150,14 @@ class StationAgent(BaseAgent):
         if any(value < 0 for value in values):
             raise ValueError("Нагрузка не может быть отрицательной")
         self.hourly_history.extend(values)
+
+    def build_forecast(self, horizon: int = DEFAULT_HORIZON,
+                       temperatures=None) -> tuple[float, ...]:
+        """Прогноз нагрузки станции на horizon часов, начиная с текущего часа."""
+        return forecast_load(
+            self.hourly_history, horizon, self.config.max_power_kw, temperatures
+        )
+
+    def forecast_peak_hours(self, forecast: tuple[float, ...]) -> tuple[int, ...]:
+        """Часы суток, в которые ожидается пик нагрузки по переданному прогнозу."""
+        return peak_hours(forecast, hour_of_tick(self.current_tick))
