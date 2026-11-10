@@ -24,6 +24,7 @@ from mas.scenario import StationConfig
 
 REJECT_CONNECTOR = "connector_mismatch"
 REJECT_DUPLICATE = "duplicate"
+REJECT_INACTIVE = "inactive"
 
 
 class StationAgent(BaseAgent):
@@ -50,6 +51,8 @@ class StationAgent(BaseAgent):
         self.base_tariff_rub = base_tariff_rub
         self.tariff_multiplier = 1.0
         self.expired: list[Order] = []
+        self.active = True
+        self.interrupted: list[Order] = []
         self.hourly_history: list[float] = []
         self._hour_buffer: list[float] = []
 
@@ -65,7 +68,8 @@ class StationAgent(BaseAgent):
         self.current_tick = tick
         self.last_powers = {}
         self.expire_orders(tick)
-        self.queue.admit(tick)
+        if self.active:
+            self.queue.admit(tick)
 
     def handle(self, message: Message) -> None:
         if isinstance(message, ChargeRequest):
@@ -77,8 +81,7 @@ class StationAgent(BaseAgent):
 
     def process_inbox(self) -> int:
         count = super().process_inbox()
-        if count:
-            # новые заявки одного такта распределяются по местам вместе, по приоритету
+        if count and self.active:
             self.queue.admit(self.current_tick)
         return count
 
@@ -88,6 +91,9 @@ class StationAgent(BaseAgent):
                 f"Заявка от {request.sender} относится к такту {request.tick}, "
                 f"а текущий такт {self.current_tick}"
             )
+        if not self.active:
+            self.rejected.append((request.sender, REJECT_INACTIVE))
+            return
         if request.connector != self.config.connector:
             self.rejected.append((request.sender, REJECT_CONNECTOR))
             return
@@ -190,6 +196,8 @@ class StationAgent(BaseAgent):
 
     def demand_kw(self) -> float:
         """Потребность станции: сумма полезных мощностей заряжающихся, но не больше мощности станции."""
+        if not self.active:
+            return 0.0
         total = sum(max_useful_power(order) for order in self.queue.active)
         return min(total, self.config.max_power_kw)
 
@@ -233,3 +241,17 @@ class StationAgent(BaseAgent):
         self.record_load(tick, sum(self.last_powers.values()))
         self.advance(self.last_powers, self.price_per_kwh)
         self.last_powers = {}
+
+    def set_active(self, active: bool) -> list[Order]:
+        """Включает или отключает станцию; при отключении все заявки прерываются."""
+        if self.active == active:
+            return []
+        self.active = active
+        if active:
+            return []
+        dropped = list(self.queue.active) + self.queue.waiting(self.current_tick)
+        for order in dropped:
+            self.queue.remove(order.ev_id)
+        self.interrupted.extend(dropped)
+        self.last_powers = {}
+        return dropped
