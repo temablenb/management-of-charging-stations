@@ -9,6 +9,7 @@ from mas.charging_plan import (
     split_power,
 )
 from mas.charging_queue import ChargingQueue, Order
+from mas.clock import TICKS_PER_HOUR
 from mas.grid_agent import GRID_ID
 from mas.messages import ChargePlan, ChargeRequest, Message
 from mas.scenario import StationConfig
@@ -35,6 +36,8 @@ class StationAgent(BaseAgent):
         self.last_powers: dict[str, float] = {}
         self.delivered_kwh = 0.0
         self.completed: list[Order] = []
+        self.hourly_history: list[float] = []
+        self._hour_buffer: list[float] = []
 
     @property
     def max_power_kw(self) -> float:
@@ -127,3 +130,22 @@ class StationAgent(BaseAgent):
             self.queue.remove(order.ev_id)
             self.completed.append(order)
         return completed
+
+    def record_load(self, tick: int, load_kw: float) -> None:
+        """Записывает нагрузку такта; по окончании часа в историю идёт среднее за час."""
+        if load_kw < 0:
+            raise ValueError("Нагрузка не может быть отрицательной")
+        self._hour_buffer.append(load_kw)
+        if (tick + 1) % TICKS_PER_HOUR == 0:
+            self.hourly_history.append(sum(self._hour_buffer) / len(self._hour_buffer))
+            self._hour_buffer.clear()
+
+    def seed_history(self, hourly_kw) -> None:
+        """Добавляет предысторию (почасовые значения, кВт) перед началом симуляции.
+
+        Последнее значение должно относиться к часу, предшествующему первому часу симуляции.
+        """
+        values = [float(value) for value in hourly_kw]
+        if any(value < 0 for value in values):
+            raise ValueError("Нагрузка не может быть отрицательной")
+        self.hourly_history.extend(values)
