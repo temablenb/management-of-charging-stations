@@ -113,3 +113,11 @@ def test_power_request_rejects_non_positive_priority():
             sender="st-1", receiver="grid", tick=5,
             demand_kw=60.0, max_power_kw=100.0, forecast_kw=(), priority=0.0,
         )
+
+
+def test_charge_plan_allows_unknown_finish_for_waiting_vehicle():
+    plan = ChargePlan(
+        sender="st-1", receiver="ev-1", tick=1, schedule_kw=(),
+        expected_finish_tick=None, queue_position=2,
+    )
+    assert plan.expected_finish_tick is None
