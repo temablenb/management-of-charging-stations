@@ -156,3 +156,15 @@ def test_deadline_expires_order_in_network():
         run_tick(bus, grid, stations, [ev1], tick)
     assert [order.ev_id for order in stations[0].expired] == ["ev-1"]
     assert stations[0].completed == []
+
+
+    def test_completion_report_reaches_vehicle():
+        bus, grid, stations = make_network(limit_kw=120.0)
+        ev1 = FakeEV("ev-1", bus)
+        run_tick(bus, grid, stations, [ev1], 0, [request(ev1, "st-1", 0, energy=20.0)])
+        for tick in range(1, 4):
+            run_tick(bus, grid, stations, [ev1], tick)
+        (report,) = ev1.reports
+        assert report.delivered_kwh == pytest.approx(20.0)
+        assert report.cost_rub > 0
+        assert report.finish_tick == 1

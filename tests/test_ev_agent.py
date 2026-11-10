@@ -4,7 +4,7 @@ import pytest
 from mas.agent import BaseAgent
 from mas.bus import MessageBus
 from mas.ev_agent import EVAgent, EVProfile, EVState, StationInfo, choose_station
-from mas.messages import MessageType
+from mas.messages import ChargeComplete, ChargePlan, MessageType, StorageOffer
 
 STATIONS = (
     StationInfo("st-1", "CCS", 100.0),
@@ -154,3 +154,119 @@ def test_unfinished_charge_is_missed_after_deadline():
     assert ev.state == EVState.REQUESTED
     ev.begin_tick(46)
     assert ev.state == EVState.MISSED
+
+
+def plan(ev, position, finish=20, tick=6):
+    return ChargePlan(
+        sender=ev.station_id, receiver=ev.agent_id, tick=tick,
+        schedule_kw=(30.0,) if position == 0 else (),
+        expected_finish_tick=finish if position == 0 else None,
+        queue_position=position,
+    )
+
+
+def test_plan_with_position_zero_starts_charging():
+    bus, ev = make_ev()
+    ev.begin_tick(5)
+    bus.deliver()
+    ev.handle(plan(ev, 0))
+    assert ev.state == EVState.CHARGING
+    assert ev.queue_position == 0
+    assert ev.expected_finish_tick == 20
+
+
+def test_plan_with_waiting_position_queues_vehicle():
+    _, ev = make_ev()
+    ev.begin_tick(5)
+    ev.handle(plan(ev, 2))
+    assert ev.state == EVState.QUEUED
+    assert ev.queue_position == 2
+    assert ev.expected_finish_tick is None
+
+
+def test_plan_after_queue_moves_to_charging():
+    _, ev = make_ev()
+    ev.begin_tick(5)
+    ev.handle(plan(ev, 1))
+    ev.handle(plan(ev, 0, finish=30))
+    assert ev.state == EVState.CHARGING
+    assert ev.expected_finish_tick == 30
+
+
+def test_plan_is_ignored_after_finish():
+    _, ev = make_ev()
+    ev.begin_tick(5)
+    ev.begin_tick(60)
+    ev.handle(plan(ev, 0))
+    assert ev.state == EVState.MISSED
+
+
+def report(ev, delivered=36.0, cost=450.0, finish=20):
+    return ChargeComplete(
+        sender=ev.station_id, receiver=ev.agent_id, tick=finish - 1,
+        delivered_kwh=delivered, cost_rub=cost, finish_tick=finish,
+    )
+
+
+def test_completion_marks_vehicle_done():
+    _, ev = make_ev()
+    ev.begin_tick(5)
+    ev.handle(report(ev))
+    assert ev.state == EVState.DONE
+    assert ev.finished
+    assert ev.delivered_kwh == 36.0
+    assert ev.cost_rub == 450.0
+    assert ev.finish_tick == 20
+    assert ev.soc == pytest.approx(0.8)
+    assert ev.deadline_met
+
+
+def test_completion_after_deadline_does_not_meet_deadline():
+    _, ev = make_ev()
+    ev.begin_tick(5)
+    ev.handle(report(ev, finish=50))
+    assert ev.state == EVState.DONE
+    assert not ev.deadline_met
+
+
+def test_completion_exactly_at_deadline_meets_it():
+    _, ev = make_ev()
+    ev.begin_tick(5)
+    ev.handle(report(ev, finish=45))
+    assert ev.deadline_met
+
+
+def test_soc_is_capped_at_one():
+    _, ev = make_ev()
+    ev.begin_tick(5)
+    ev.handle(report(ev, delivered=100.0))
+    assert ev.soc == 1.0
+
+
+def test_done_vehicle_does_not_become_missed():
+    _, ev = make_ev()
+    ev.begin_tick(5)
+    ev.handle(report(ev))
+    ev.begin_tick(100)
+    assert ev.state == EVState.DONE
+
+
+def test_plan_arrives_through_bus():
+    bus, ev = make_ev()
+    other = BaseAgent("other", bus)
+    other.send(ChargePlan(
+        sender="other", receiver="ev-1", tick=1, schedule_kw=(), expected_finish_tick=None,
+        queue_position=1,
+    ))
+    bus.deliver()
+    assert ev.process_inbox() == 1
+    assert ev.state == EVState.QUEUED
+
+
+def test_unexpected_message_type_is_rejected():
+    bus, ev = make_ev()
+    other = BaseAgent("other", bus)
+    other.send(StorageOffer(sender="other", receiver="ev-1", tick=1, available_kw=5.0, soc=0.5))
+    bus.deliver()
+    with pytest.raises(NotImplementedError):
+        ev.process_inbox()
