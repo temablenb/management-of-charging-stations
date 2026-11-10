@@ -3,21 +3,24 @@ import pytest
 from mas.agent import BaseAgent
 from mas.bus import MessageBus
 from mas.grid_agent import GridAgent
-from mas.messages import ChargePlan, ChargeRequest, MessageType
+from mas.messages import ChargeComplete, ChargePlan, ChargeRequest, MessageType
 from mas.scenario import StationConfig
 from mas.station_agent import StationAgent
 
 
 class FakeEV(BaseAgent):
-    """Автомобиль-заглушка: запоминает полученные планы."""
+    """Автомобиль-заглушка: запоминает полученные планы и отчёты о завершении."""
 
     def __init__(self, ev_id, bus):
         super().__init__(ev_id, bus)
         self.plans = []
+        self.reports = []
 
     def handle(self, message):
         if isinstance(message, ChargePlan):
             self.plans.append(message)
+        elif isinstance(message, ChargeComplete):
+            self.reports.append(message)
         else:
             super().handle(message)
 

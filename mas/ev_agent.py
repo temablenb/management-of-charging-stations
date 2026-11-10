@@ -6,7 +6,7 @@ import numpy as np
 
 from mas.agent import BaseAgent
 from mas.bus import MessageBus
-from mas.messages import ChargePlan, ChargeRequest, Message
+from mas.messages import ChargeComplete, ChargePlan, ChargeRequest, Message
 
 class EVState(str, Enum):
     PENDING = "pending"          # ещё не подал заявку
@@ -141,6 +141,8 @@ class EVAgent(BaseAgent):
     def handle(self, message: Message) -> None:
         if isinstance(message, ChargePlan):
             self._apply_plan(message)
+        elif isinstance(message, ChargeComplete):
+            self._complete(message)
         else:
             super().handle(message)
 
@@ -150,3 +152,10 @@ class EVAgent(BaseAgent):
         self.queue_position = plan.queue_position
         self.expected_finish_tick = plan.expected_finish_tick
         self.state = EVState.CHARGING if plan.queue_position == 0 else EVState.QUEUED
+
+    def _complete(self, report: ChargeComplete) -> None:
+        self.state = EVState.DONE
+        self.delivered_kwh = report.delivered_kwh
+        self.cost_rub = report.cost_rub
+        self.finish_tick = report.finish_tick
+        self.soc = min(1.0, self.soc + report.delivered_kwh / self.profile.battery_kwh)
