@@ -6,6 +6,7 @@ import numpy as np
 
 from mas.agent import BaseAgent
 from mas.bus import MessageBus
+from mas.ev_behavior import choose_start_tick
 from mas.messages import ChargeComplete, ChargePlan, ChargeRequest, Message
 
 class EVState(str, Enum):
@@ -88,6 +89,13 @@ class EVAgent(BaseAgent):
         self.stations = tuple(stations)
         self.rng = rng
         self.state = EVState.PENDING
+        self.planned_start_tick = choose_start_tick(
+            profile.arrival_tick,
+            profile.deadline_tick,
+            profile.needed_kwh,
+            profile.max_charge_kw,
+            profile.price_sensitivity,
+        )
         self.current_tick = 0
         self.station_id: str | None = None
         self.request_tick: int | None = None
@@ -97,6 +105,11 @@ class EVAgent(BaseAgent):
         self.delivered_kwh = 0.0
         self.cost_rub = 0.0
         self.finish_tick: int | None = None
+
+    @property
+    def delayed(self) -> bool:
+        """Автомобиль решил отложить заявку на более дешёвое время."""
+        return self.planned_start_tick > self.profile.arrival_tick
 
     @property
     def finished(self) -> bool:
@@ -117,7 +130,7 @@ class EVAgent(BaseAgent):
         if self.state == EVState.PENDING:
             if tick >= self.profile.deadline_tick:
                 self.state = EVState.MISSED  # приехал слишком поздно, подавать заявку нет смысла
-            elif tick >= self.profile.arrival_tick:
+            elif tick >= self.planned_start_tick:
                 self._send_request(tick)
         elif tick > self.profile.deadline_tick:
             self.state = EVState.MISSED
