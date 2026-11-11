@@ -270,3 +270,43 @@ def test_unexpected_message_type_is_rejected():
     bus.deliver()
     with pytest.raises(NotImplementedError):
         ev.process_inbox()
+
+
+def test_profile_rejects_invalid_price_sensitivity():
+    with pytest.raises(ValueError):
+        make_profile(price_sensitivity=1.5)
+    with pytest.raises(ValueError):
+        make_profile(price_sensitivity=-0.1)
+
+
+def test_insensitive_vehicle_requests_at_arrival():
+    bus, ev = make_ev(make_profile(arrival_tick=72, deadline_tick=112, price_sensitivity=0.0))
+    assert ev.planned_start_tick == 72
+    assert not ev.delayed
+    ev.begin_tick(72)
+    assert ev.state == EVState.REQUESTED
+
+
+def test_sensitive_vehicle_delays_request_to_cheaper_zone():
+    profile = make_profile(
+        arrival_tick=72, deadline_tick=112, price_sensitivity=1.0,
+        battery_kwh=60.0, soc=0.2, target_soc=0.8, max_charge_kw=50.0,
+    )
+    bus, ev = make_ev(profile)
+    assert ev.planned_start_tick == 92
+    assert ev.delayed
+    ev.begin_tick(72)
+    ev.begin_tick(91)
+    assert ev.state == EVState.PENDING
+    assert bus.pending_count == 0
+    ev.begin_tick(92)
+    assert ev.state == EVState.REQUESTED
+    assert ev.request_tick == 92
+
+
+def test_delayed_vehicle_is_not_marked_missed_while_waiting():
+    profile = make_profile(arrival_tick=72, deadline_tick=112, price_sensitivity=1.0)
+    _, ev = make_ev(profile)
+    for tick in range(72, 92):
+        ev.begin_tick(tick)
+    assert ev.state == EVState.PENDING
