@@ -31,6 +31,7 @@ class EVProfile:
     arrival_tick: int
     deadline_tick: int
     prepaid: bool = False
+    price_sensitivity: float = 0.0
 
     def __post_init__(self):
         if self.battery_kwh <= 0:
@@ -43,6 +44,8 @@ class EVProfile:
             raise ValueError("Такт приезда не может быть отрицательным")
         if self.deadline_tick <= self.arrival_tick:
             raise ValueError("Дедлайн должен быть позже такта приезда")
+        if not 0.0 <= self.price_sensitivity <= 1.0:
+            raise ValueError("Чувствительность к цене должна быть от 0 до 1")
 
     @property
     def needed_kwh(self) -> float:
