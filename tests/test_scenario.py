@@ -100,3 +100,25 @@ def test_storage_initial_soc_range():
 def test_load_missing_file_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         load_scenario(tmp_path / "no.json")
+
+
+def test_shares_have_defaults():
+    config = ScenarioConfig.from_dict(make_data())
+    assert config.sensitive_share == 0.3
+    assert config.prepaid_share == 0.2
+
+
+def test_shares_are_read_from_data():
+    config = ScenarioConfig.from_dict(make_data(sensitive_share=0.5, prepaid_share=0.1))
+    assert config.sensitive_share == 0.5
+    assert config.prepaid_share == 0.1
+
+
+def test_sensitive_share_out_of_range_rejected():
+    with pytest.raises(ValueError):
+        ScenarioConfig.from_dict(make_data(sensitive_share=1.5))
+
+
+def test_prepaid_share_out_of_range_rejected():
+    with pytest.raises(ValueError):
+        ScenarioConfig.from_dict(make_data(prepaid_share=-0.1))
