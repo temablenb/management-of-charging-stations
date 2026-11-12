@@ -10,6 +10,7 @@ from mas.messages import (
     PowerAllocation,
     PowerRequest,
     StorageOffer,
+    ChargeComplete,
 )
 
 
@@ -121,3 +122,28 @@ def test_charge_plan_allows_unknown_finish_for_waiting_vehicle():
         expected_finish_tick=None, queue_position=2,
     )
     assert plan.expected_finish_tick is None
+
+
+def test_charge_complete_type_and_fields():
+    message = ChargeComplete(
+        sender="st-1", receiver="ev-1", tick=9,
+        delivered_kwh=36.0, cost_rub=450.0, finish_tick=10,
+    )
+    assert message.type == MessageType.CHARGE_COMPLETE
+    assert message.finish_tick == 10
+
+
+def test_charge_complete_rejects_negative_values():
+    with pytest.raises(ValueError):
+        ChargeComplete(sender="st-1", receiver="ev-1", tick=9,
+                       delivered_kwh=-1.0, cost_rub=0.0, finish_tick=10)
+    with pytest.raises(ValueError):
+        ChargeComplete(sender="st-1", receiver="ev-1", tick=9,
+                       delivered_kwh=1.0, cost_rub=-5.0, finish_tick=10)
+
+
+def test_charge_complete_is_immutable():
+    message = ChargeComplete(sender="st-1", receiver="ev-1", tick=9,
+                             delivered_kwh=1.0, cost_rub=1.0, finish_tick=10)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        message.cost_rub = 0.0

@@ -3,21 +3,24 @@ import pytest
 from mas.agent import BaseAgent
 from mas.bus import MessageBus
 from mas.grid_agent import GridAgent
-from mas.messages import ChargePlan, ChargeRequest, MessageType
+from mas.messages import ChargeComplete, ChargePlan, ChargeRequest, MessageType
 from mas.scenario import StationConfig
 from mas.station_agent import StationAgent
 
 
 class FakeEV(BaseAgent):
-    """Автомобиль-заглушка: запоминает полученные планы."""
+    """Автомобиль-заглушка: запоминает полученные планы и отчёты о завершении."""
 
     def __init__(self, ev_id, bus):
         super().__init__(ev_id, bus)
         self.plans = []
+        self.reports = []
 
     def handle(self, message):
         if isinstance(message, ChargePlan):
             self.plans.append(message)
+        elif isinstance(message, ChargeComplete):
+            self.reports.append(message)
         else:
             super().handle(message)
 
@@ -153,3 +156,15 @@ def test_deadline_expires_order_in_network():
         run_tick(bus, grid, stations, [ev1], tick)
     assert [order.ev_id for order in stations[0].expired] == ["ev-1"]
     assert stations[0].completed == []
+
+
+    def test_completion_report_reaches_vehicle():
+        bus, grid, stations = make_network(limit_kw=120.0)
+        ev1 = FakeEV("ev-1", bus)
+        run_tick(bus, grid, stations, [ev1], 0, [request(ev1, "st-1", 0, energy=20.0)])
+        for tick in range(1, 4):
+            run_tick(bus, grid, stations, [ev1], tick)
+        (report,) = ev1.reports
+        assert report.delivered_kwh == pytest.approx(20.0)
+        assert report.cost_rub > 0
+        assert report.finish_tick == 1

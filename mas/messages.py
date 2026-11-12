@@ -13,6 +13,8 @@ class MessageType(str, Enum):
     POWER_REQUEST = "power_request"
     POWER_ALLOCATION = "power_allocation"
     STORAGE_OFFER = "storage_offer"
+    CHARGE_COMPLETE = "charge_complete"
+    STORAGE_DISPATCH = "storage_dispatch"
 
 
 @dataclass(frozen=True)
@@ -120,3 +122,37 @@ class StorageOffer(Message):
     @property
     def type(self) -> MessageType:
         return MessageType.STORAGE_OFFER
+
+
+@dataclass(frozen=True)
+class ChargeComplete(Message):
+    """Уведомление станции автомобилю о завершении зарядки: энергия, стоимость, такт."""
+
+    delivered_kwh: float
+    cost_rub: float
+    finish_tick: int
+
+    def __post_init__(self):
+        if self.delivered_kwh < 0:
+            raise ValueError("Переданная энергия не может быть отрицательной")
+        if self.cost_rub < 0:
+            raise ValueError("Стоимость не может быть отрицательной")
+
+    @property
+    def type(self) -> MessageType:
+        return MessageType.CHARGE_COMPLETE
+
+
+@dataclass(frozen=True)
+class StorageDispatch(Message):
+    """Команда Grid Agent накопителю: сколько мощности отдать в сеть в этом такте."""
+
+    discharge_kw: float
+
+    def __post_init__(self):
+        if self.discharge_kw < 0:
+            raise ValueError("Мощность отдачи не может быть отрицательной")
+
+    @property
+    def type(self) -> MessageType:
+        return MessageType.STORAGE_DISPATCH

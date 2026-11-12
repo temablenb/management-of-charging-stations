@@ -14,6 +14,7 @@ from mas.clock import TICKS_PER_HOUR, hour_of_tick
 from mas.forecast import DEFAULT_HORIZON, forecast_load, peak_hours
 from mas.grid_agent import GRID_ID
 from mas.messages import (
+    ChargeComplete,
     ChargePlan,
     ChargeRequest,
     Message,
@@ -239,7 +240,12 @@ class StationAgent(BaseAgent):
     def end_tick(self, tick: int) -> None:
         """Конец такта: записывает нагрузку в историю и проводит зарядку по выделенной мощности."""
         self.record_load(tick, sum(self.last_powers.values()))
-        self.advance(self.last_powers, self.price_per_kwh)
+        for order in self.advance(self.last_powers, self.price_per_kwh):
+            self.send(ChargeComplete(
+                sender=self.agent_id, receiver=order.ev_id, tick=tick,
+                delivered_kwh=order.energy_kwh - order.remaining_kwh,
+                cost_rub=order.cost_rub, finish_tick=order.finish_tick,
+            ))
         self.last_powers = {}
 
     def set_active(self, active: bool) -> list[Order]:

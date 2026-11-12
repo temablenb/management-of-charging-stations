@@ -50,6 +50,8 @@ class ScenarioConfig:
     ev_per_day: int
     stations: tuple[StationConfig, ...]
     storage: StorageConfig | None = None
+    sensitive_share: float = 0.3
+    prepaid_share: float = 0.2
 
     def __post_init__(self):
         if self.days < 1:
@@ -62,6 +64,10 @@ class ScenarioConfig:
             raise ValueError("Должно выполняться 0 < минимальный множитель < максимальный")
         if self.ev_per_day < 0:
             raise ValueError("Число автомобилей в сутки не может быть отрицательным")
+        if not 0.0 <= self.sensitive_share <= 1.0:
+            raise ValueError("Доля чувствительных к цене автомобилей должна быть от 0 до 1")
+        if not 0.0 <= self.prepaid_share <= 1.0:
+            raise ValueError("Доля автомобилей с предоплатой должна быть от 0 до 1")
         if not self.stations:
             raise ValueError("В сценарии должна быть хотя бы одна станция")
         ids = [station.station_id for station in self.stations]
@@ -93,6 +99,8 @@ class ScenarioConfig:
             ev_per_day=int(data["ev_per_day"]),
             stations=tuple(StationConfig(**item) for item in data["stations"]),
             storage=StorageConfig(**storage) if storage else None,
+            sensitive_share=float(data.get("sensitive_share", 0.3)),
+            prepaid_share=float(data.get("prepaid_share", 0.2)),
         )
 
 
