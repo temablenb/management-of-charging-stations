@@ -1,8 +1,23 @@
+from dataclasses import replace
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from mas.clock import TICKS_PER_DAY, hour_of_tick
-from mas.ev_generator import HOUR_WEIGHTS, arrival_probabilities, generate_arrival_ticks
+from mas.ev_generator import (
+    HOUR_WEIGHTS,
+    arrival_probabilities,
+    generate_arrival_ticks,
+    generate_profiles,
+    vehicle_rng,
+)
+from mas.ev_models import EVModel, load_ev_models
+from mas.scenario import load_scenario
+
+ROOT = Path(__file__).resolve().parent.parent
+CONFIG = load_scenario(ROOT / "scenarios" / "default.json")
+MODELS = load_ev_models(ROOT / "scenarios" / "ev_models.json")
 
 
 def test_probabilities_sum_to_one():
@@ -85,3 +100,82 @@ def test_arrival_inputs_are_validated():
         generate_arrival_ticks(-1, 1, rng)
     with pytest.raises(ValueError):
         generate_arrival_ticks(10, 0, rng)
+
+
+def test_profiles_count_and_order():
+    profiles = generate_profiles(CONFIG, MODELS)
+    assert len(profiles) == CONFIG.ev_per_day * CONFIG.days
+    arrivals = [profile.arrival_tick for profile in profiles]
+    assert arrivals == sorted(arrivals)
+
+
+def test_profile_ids_are_unique_and_numbered():
+    profiles = generate_profiles(CONFIG, MODELS)
+    ids = [profile.ev_id for profile in profiles]
+    assert len(set(ids)) == len(ids)
+    assert ids[0] == "ev-0001"
+    assert ids[-1] == f"ev-{len(ids):04d}"
+
+
+def test_profiles_use_only_connectors_present_on_stations():
+    profiles = generate_profiles(CONFIG, MODELS)
+    assert {profile.connector for profile in profiles} <= {"CCS", "GB/T"}
+
+
+def test_profiles_are_reproducible_by_seed():
+    assert generate_profiles(CONFIG, MODELS) == generate_profiles(CONFIG, MODELS)
+
+
+def test_profiles_depend_on_seed():
+    other = replace(CONFIG, seed=CONFIG.seed + 1)
+    assert generate_profiles(CONFIG, MODELS) != generate_profiles(other, MODELS)
+
+
+def test_sensitive_and_prepaid_shares_are_respected():
+    config = replace(CONFIG, ev_per_day=500, days=2, sensitive_share=0.5, prepaid_share=0.1)
+    profiles = generate_profiles(config, MODELS)
+    sensitive = sum(1 for profile in profiles if profile.price_sensitivity > 0) / len(profiles)
+    prepaid = sum(1 for profile in profiles if profile.prepaid) / len(profiles)
+    assert sensitive == pytest.approx(0.5, abs=0.05)
+    assert prepaid == pytest.approx(0.1, abs=0.04)
+
+
+def test_zero_shares_give_insensitive_vehicles_without_prepayment():
+    config = replace(CONFIG, sensitive_share=0.0, prepaid_share=0.0)
+    profiles = generate_profiles(config, MODELS)
+    assert all(profile.price_sensitivity == 0.0 for profile in profiles)
+    assert not any(profile.prepaid for profile in profiles)
+
+
+def test_sensitivity_values_are_in_expected_range():
+    config = replace(CONFIG, sensitive_share=1.0)
+    profiles = generate_profiles(config, MODELS)
+    assert all(0.4 <= profile.price_sensitivity <= 1.0 for profile in profiles)
+
+
+def test_profiles_soc_and_deadlines_are_consistent():
+    for profile in generate_profiles(CONFIG, MODELS):
+        assert 0.1 <= profile.soc <= 0.5
+        assert profile.target_soc == 0.8
+        assert profile.deadline_tick > profile.arrival_tick
+
+
+def test_no_vehicles_when_scenario_has_none():
+    config = replace(CONFIG, ev_per_day=0)
+    assert generate_profiles(config, MODELS) == []
+
+
+def test_error_when_no_model_matches_station_connectors():
+    only_chademo = (EVModel("Nissan", "Leaf", 40.0, 50.0, "CHAdeMO"),)
+    with pytest.raises(ValueError):
+        generate_profiles(CONFIG, only_chademo)
+
+
+def test_vehicle_rng_is_reproducible_and_per_vehicle():
+    assert vehicle_rng(42, "ev-0001").integers(1_000_000) == vehicle_rng(42, "ev-0001").integers(1_000_000)
+    values = {int(vehicle_rng(42, f"ev-{i:04d}").integers(1_000_000)) for i in range(1, 20)}
+    assert len(values) > 10
+
+
+def test_vehicle_rng_depends_on_seed():
+    assert vehicle_rng(1, "ev-0001").integers(1_000_000) != vehicle_rng(2, "ev-0001").integers(1_000_000)
