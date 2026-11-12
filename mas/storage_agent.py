@@ -8,10 +8,27 @@ from mas.agent import BaseAgent
 from mas.bus import MessageBus
 from mas.charging_plan import TICK_HOURS
 from mas.scenario import StorageConfig
+from mas.tariff import NIGHT, PEAK, time_zone
 
 STORAGE_ID = "storage"
 MIN_SOC = 0.10
 MAX_SOC = 0.95
+
+CHARGE_PRIORITY = 0.5
+
+CHARGE = "charge"
+DISCHARGE = "discharge"
+IDLE = "idle"
+
+
+def mode_for_tick(tick: int) -> str:
+    """Режим по тарифной зоне: ночью заряд, в пик готовность к отдаче, днём покой."""
+    zone = time_zone(tick)
+    if zone == NIGHT:
+        return CHARGE
+    if zone == PEAK:
+        return DISCHARGE
+    return IDLE
 
 
 class StorageAgent(BaseAgent):
