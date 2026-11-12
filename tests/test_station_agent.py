@@ -2,7 +2,7 @@ import pytest
 
 from mas.agent import BaseAgent
 from mas.bus import MessageBus
-from mas.messages import ChargeRequest, PowerAllocation
+from mas.messages import ChargeRequest, StorageOffer
 from mas.scenario import StationConfig
 from mas.station_agent import REJECT_CONNECTOR, REJECT_DUPLICATE, StationAgent
 
@@ -109,9 +109,9 @@ def test_request_from_other_tick_is_rejected(setup):
 def test_unexpected_message_type_is_rejected(setup):
     bus, station, _ = setup
     grid = BaseAgent("grid", bus)
-    grid.send(PowerAllocation(
+    grid.send(StorageOffer(
         sender="grid", receiver="st-1", tick=1,
-        allocated_kw=10.0, tariff_multiplier=1.0,
+        available_kw=10.0, soc=0.5,
     ))
     bus.deliver()
     with pytest.raises(NotImplementedError):
