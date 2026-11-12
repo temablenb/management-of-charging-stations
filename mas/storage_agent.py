@@ -7,13 +7,20 @@
 from mas.agent import BaseAgent
 from mas.bus import MessageBus
 from mas.charging_plan import TICK_HOURS
+from mas.grid_agent import GRID_ID
+from mas.messages import (
+    Message,
+    PowerAllocation,
+    PowerRequest,
+    StorageDispatch,
+    StorageOffer,
+)
 from mas.scenario import StorageConfig
 from mas.tariff import NIGHT, PEAK, time_zone
 
 STORAGE_ID = "storage"
 MIN_SOC = 0.10
 MAX_SOC = 0.95
-
 CHARGE_PRIORITY = 0.5
 
 CHARGE = "charge"
@@ -37,6 +44,7 @@ class StorageAgent(BaseAgent):
         bus: MessageBus,
         config: StorageConfig,
         agent_id: str = STORAGE_ID,
+        grid_id: str = GRID_ID,
         min_soc: float = MIN_SOC,
         max_soc: float = MAX_SOC,
     ) -> None:
@@ -44,11 +52,17 @@ class StorageAgent(BaseAgent):
             raise ValueError("Должно выполняться 0 <= min_soc < max_soc <= 1")
         super().__init__(agent_id, bus)
         self.config = config
+        self.grid_id = grid_id
         self.min_soc = min_soc
         self.max_soc = max_soc
         self.energy_kwh = min(max(config.initial_soc, min_soc), max_soc) * config.capacity_kwh
         self.charged_kwh = 0.0
         self.discharged_kwh = 0.0
+        self.current_tick = 0
+        self.mode = IDLE
+        self.charge_kw = 0.0
+        self.discharge_kw = 0.0
+        self.soc_history: list[float] = []
 
     @property
     def soc(self) -> float:
@@ -92,3 +106,38 @@ class StorageAgent(BaseAgent):
         self.energy_kwh -= delivered * TICK_HOURS / self.config.efficiency
         self.discharged_kwh += delivered * TICK_HOURS
         return delivered
+
+    def begin_tick(self, tick: int) -> None:
+        """Ночью просит у Grid Agent мощность на заряд, в пик предлагает резерв."""
+        self.current_tick = tick
+        self.mode = mode_for_tick(tick)
+        self.charge_kw = 0.0
+        self.discharge_kw = 0.0
+        if self.mode == DISCHARGE:
+            self.send(StorageOffer(
+                sender=self.agent_id, receiver=self.grid_id, tick=tick,
+                available_kw=self.max_discharge_kw(), soc=min(1.0, self.soc),
+            ))
+        elif self.mode == CHARGE and self.max_charge_kw() > 0:
+            self.send(PowerRequest(
+                sender=self.agent_id, receiver=self.grid_id, tick=tick,
+                demand_kw=self.max_charge_kw(), max_power_kw=self.config.max_power_kw,
+                forecast_kw=(), priority=CHARGE_PRIORITY,
+            ))
+
+    def handle(self, message: Message) -> None:
+        if isinstance(message, (PowerAllocation, StorageDispatch)):
+            if message.tick != self.current_tick:
+                raise ValueError(
+                    f"Сообщение относится к такту {message.tick}, "
+                    f"а текущий такт {self.current_tick}"
+                )
+            if isinstance(message, PowerAllocation):
+                self.charge_kw = self.charge(message.allocated_kw)
+            else:
+                self.discharge_kw = self.discharge(message.discharge_kw)
+        else:
+            super().handle(message)
+
+    def end_tick(self, tick: int) -> None:
+        self.soc_history.append(self.soc)

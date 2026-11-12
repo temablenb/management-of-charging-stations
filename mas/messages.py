@@ -14,6 +14,7 @@ class MessageType(str, Enum):
     POWER_ALLOCATION = "power_allocation"
     STORAGE_OFFER = "storage_offer"
     CHARGE_COMPLETE = "charge_complete"
+    STORAGE_DISPATCH = "storage_dispatch"
 
 
 @dataclass(frozen=True)
@@ -140,3 +141,18 @@ class ChargeComplete(Message):
     @property
     def type(self) -> MessageType:
         return MessageType.CHARGE_COMPLETE
+
+
+@dataclass(frozen=True)
+class StorageDispatch(Message):
+    """Команда Grid Agent накопителю: сколько мощности отдать в сеть в этом такте."""
+
+    discharge_kw: float
+
+    def __post_init__(self):
+        if self.discharge_kw < 0:
+            raise ValueError("Мощность отдачи не может быть отрицательной")
+
+    @property
+    def type(self) -> MessageType:
+        return MessageType.STORAGE_DISPATCH

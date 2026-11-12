@@ -9,7 +9,13 @@ from mas.allocation import (
     allocate_proportional,
 )
 from mas.bus import MessageBus
-from mas.messages import Message, PowerAllocation, PowerRequest, StorageOffer
+from mas.messages import (
+    Message,
+    PowerAllocation,
+    PowerRequest,
+    StorageDispatch,
+    StorageOffer,
+)
 from mas.tariff import (
     DEFAULT_MAX_MULT,
     DEFAULT_MIN_MULT,
@@ -173,6 +179,12 @@ class GridAgent(BaseAgent):
         result = self.compute_allocation()
         multipliers = self.compute_multipliers(result)
         self.send_allocations(result, multipliers)
+        if self._storage_offer is not None:
+            used_kw = min(self.storage_kw, max(0.0, result.total_kw - self.limit_kw))
+            self.send(StorageDispatch(
+                sender=self.agent_id, receiver=self._storage_offer.sender,
+                tick=self.current_tick, discharge_kw=used_kw,
+            ))
         self._decisions.append(GridDecision(
             tick=self.current_tick,
             substation_limit_kw=self.limit_kw,
