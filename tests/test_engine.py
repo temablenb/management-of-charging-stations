@@ -130,3 +130,66 @@ def test_message_flow_contains_all_message_types(finished_sim):
     counts = finished_sim.bus.count_by_type()
     for message_type in MessageType:
         assert counts.get(message_type, 0) >= 1, message_type
+
+
+def run_signature(sim):
+    """Всё, что должно совпадать у двух одинаковых прогонов."""
+    return (
+        [(entry.message.type, entry.message.sender, entry.message.receiver, entry.message.tick)
+         for entry in sim.bus.journal],
+        [(d.tick, d.allocated_kw, d.multipliers) for d in sim.grid.decisions],
+        [(ev.state, ev.delivered_kwh, ev.cost_rub, ev.finish_tick) for ev in sim.evs],
+        [station.delivered_kwh for station in sim.stations],
+    )
+
+
+def test_same_seed_gives_identical_run():
+    first, second = make_sim(), make_sim()
+    first.run()
+    second.run()
+    assert run_signature(first) == run_signature(second)
+
+
+def test_different_seed_gives_different_run():
+    first = make_sim(small_config(seed=3))
+    second = make_sim(small_config(seed=4))
+    first.run()
+    second.run()
+    assert run_signature(first) != run_signature(second)
+
+
+def test_stepwise_run_equals_single_run():
+    stepwise = make_sim()
+    for _ in range(stepwise.total_ticks):
+        stepwise.step()
+    stepwise.finalize()
+    single = make_sim()
+    single.run()
+    assert run_signature(stepwise) == run_signature(single)
+
+
+def test_run_more_ticks_than_remaining_stops_at_end():
+    sim = make_sim()
+    sim.run(ticks=10_000)
+    assert sim.finished
+    assert sim.tick == TICKS_PER_DAY
+
+
+def test_run_rejects_negative_tick_count():
+    with pytest.raises(ValueError):
+        make_sim().run(ticks=-1)
+
+
+def test_finalize_delivers_last_reports():
+    config = small_config(ev_per_day=0)
+    sim = Simulation(config, [], warmup_days=1)
+    sim.run(ticks=5)
+    assert sim.bus.pending_count == 0
+
+
+def test_simulation_without_vehicles_has_no_charging():
+    config = replace(small_config(), ev_per_day=0)
+    sim = Simulation(config, [], warmup_days=1)
+    sim.run()
+    assert sum(station.delivered_kwh for station in sim.stations) == 0
+    assert all(d.requested_kw <= sim.storage.config.max_power_kw for d in sim.grid.decisions)
