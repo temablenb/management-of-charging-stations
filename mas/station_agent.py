@@ -56,6 +56,7 @@ class StationAgent(BaseAgent):
         self.interrupted: list[Order] = []
         self.hourly_history: list[float] = []
         self._hour_buffer: list[float] = []
+        self._forecast_cache: tuple | None = None
 
     @property
     def max_power_kw(self) -> float:
@@ -177,10 +178,21 @@ class StationAgent(BaseAgent):
 
     def build_forecast(self, horizon: int = DEFAULT_HORIZON,
                        temperatures=None) -> tuple[float, ...]:
-        """Прогноз нагрузки станции на horizon часов, начиная с текущего часа."""
-        return forecast_load(
-            self.hourly_history, horizon, self.config.max_power_kw, temperatures
-        )
+        """Прогноз нагрузки станции на horizon часов, начиная с текущего часа.
+
+        История меняется раз в час, поэтому без температур прогноз пересчитывается
+        только при появлении нового часа, а в остальное время берётся из кэша.
+        """
+        if temperatures is not None:
+            return forecast_load(
+                self.hourly_history, horizon, self.config.max_power_kw, temperatures
+            )
+        key = (len(self.hourly_history), horizon)
+        if self._forecast_cache is not None and self._forecast_cache[0] == key:
+            return self._forecast_cache[1]
+        forecast = forecast_load(self.hourly_history, horizon, self.config.max_power_kw)
+        self._forecast_cache = (key, forecast)
+        return forecast
 
     def forecast_peak_hours(self, forecast: tuple[float, ...]) -> tuple[int, ...]:
         """Часы суток, в которые ожидается пик нагрузки по переданному прогнозу."""

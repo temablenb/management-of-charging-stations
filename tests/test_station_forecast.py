@@ -121,3 +121,48 @@ def test_history_is_collected_across_ticks_and_feeds_forecast():
         station.record_load(tick, 20.0)
     assert station.hourly_history == [20.0] * 4
     assert station.build_forecast(horizon=2) == (20.0, 20.0)
+
+
+def test_forecast_is_cached_until_history_changes(monkeypatch):
+    from mas import station_agent
+
+    calls = []
+    original = station_agent.forecast_load
+
+    def counting(*args, **kwargs):
+        calls.append(1)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(station_agent, "forecast_load", counting)
+    station = make_station()
+    station.seed_history([10.0] * 5)
+    first = station.build_forecast(horizon=3)
+    second = station.build_forecast(horizon=3)
+    assert first == second
+    assert len(calls) == 1
+
+
+def test_forecast_cache_is_refreshed_with_new_hour():
+    station = make_station()
+    station.seed_history([10.0] * 5)
+    before = station.build_forecast(horizon=2)
+    for tick in range(4):
+        station.record_load(tick, 50.0)
+    after = station.build_forecast(horizon=2)
+    assert after != before
+
+
+def test_forecast_cache_depends_on_horizon():
+    station = make_station()
+    station.seed_history([10.0] * 5)
+    assert len(station.build_forecast(horizon=2)) == 2
+    assert len(station.build_forecast(horizon=4)) == 4
+
+
+def test_forecast_with_temperatures_bypasses_cache():
+    station = make_station()
+    station.seed_history([10.0] * 5)
+    plain = station.build_forecast(horizon=2)
+    cold = station.build_forecast(horizon=2, temperatures=[-20.0, -20.0])
+    assert cold[0] > plain[0]
+    assert station.build_forecast(horizon=2) == plain
