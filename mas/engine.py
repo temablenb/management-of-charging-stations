@@ -63,3 +63,58 @@ class Simulation:
     @property
     def finished(self) -> bool:
         return self.clock.tick >= self.total_ticks
+
+    def step(self) -> int:
+        """Выполняет один такт и возвращает его номер.
+
+        Порядок фаз: инициатива агентов и заявки, запросы станций, решение Grid Agent,
+        выделение и планы, обработка планов автомобилями, конец такта.
+        """
+        if self.finished:
+            raise RuntimeError("Симуляция уже завершена")
+        tick = self.clock.tick
+        self.grid.begin_tick(tick)
+        if self.storage:
+            self.storage.begin_tick(tick)
+        for station in self.stations:
+            station.begin_tick(tick)
+        for ev in self.evs:
+            ev.begin_tick(tick)
+        self.bus.deliver()
+        for station in self.stations:
+            station.process_inbox()
+        for station in self.stations:
+            station.send_power_request()
+        self.bus.deliver()
+        self.grid.process_inbox()
+        self.grid.run_allocation()
+        self.bus.deliver()
+        for station in self.stations:
+            station.process_inbox()
+        if self.storage:
+            self.storage.process_inbox()
+        self.bus.deliver()
+        for ev in self.evs:
+            ev.process_inbox()
+        for station in self.stations:
+            station.end_tick(tick)
+        if self.storage:
+            self.storage.end_tick(tick)
+        self.clock.advance()
+        return tick
+
+    def finalize(self) -> None:
+        """Доставляет последние сообщения (отчёты о завершении зарядки) автомобилям."""
+        self.bus.deliver()
+        for ev in self.evs:
+            ev.process_inbox()
+
+    def run(self, ticks: int | None = None) -> None:
+        """Выполняет ticks тактов (по умолчанию до конца сценария), затем finalize()."""
+        remaining = self.total_ticks - self.clock.tick
+        count = remaining if ticks is None else min(ticks, remaining)
+        if count < 0:
+            raise ValueError("Число тактов не может быть отрицательным")
+        for _ in range(count):
+            self.step()
+        self.finalize()
