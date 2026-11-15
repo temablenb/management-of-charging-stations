@@ -6,7 +6,21 @@ import pytest
 from mas.engine import Simulation
 from mas.ev_generator import generate_profiles
 from mas.ev_models import load_ev_models
-from mas.metrics import OVERLOAD_TOLERANCE_KW, TickRecord, collect_tick
+from mas.ev_agent import EVState
+from mas.grid_agent import GridDecision
+from mas.metrics import (
+    OVERLOAD_PENALTY_MULT,
+    OVERLOAD_TOLERANCE_KW,
+    PURCHASE_SHARE,
+    TickRecord,
+    collect_tick,
+    cost_metrics,
+    decision_counts,
+    load_metrics,
+    station_orders,
+    summarize,
+    vehicle_metrics,
+)
 from mas.scenario import ScenarioConfig
 
 MODELS = load_ev_models(Path(__file__).resolve().parent.parent / "scenarios" / "ev_models.json")
@@ -115,3 +129,140 @@ def test_loads_never_negative_and_net_load_within_limit(finished_sim):
     for record in finished_sim.records:
         assert record.stations_kw >= 0.0
         assert not record.is_overloaded
+
+
+def test_load_metrics_for_empty_records():
+    metrics = load_metrics([])
+    assert metrics.peak_load_kw == 0.0
+    assert metrics.overload_ticks == 0
+
+
+def test_load_metrics_peak_mean_and_overload():
+    records = [
+        make_record(tick=0, station_kw={"st-1": 40.0}),
+        make_record(tick=1, station_kw={"st-1": 120.0}),
+        make_record(tick=2, station_kw={"st-1": 80.0}),
+    ]
+    metrics = load_metrics(records)
+    assert metrics.peak_load_kw == 120.0
+    assert metrics.mean_load_kw == pytest.approx(80.0)
+    assert metrics.overload_ticks == 1
+    assert metrics.max_overload_kw == 20.0
+    assert metrics.overload_kwh == pytest.approx(5.0)
+
+
+def test_cost_metrics_depend_on_time_of_day():
+    night = [make_record(tick=2, station_kw={"st-1": 100.0}, limit_kw=200.0)]
+    peak = [make_record(tick=72, station_kw={"st-1": 100.0}, limit_kw=200.0)]
+    night_cost, _ = cost_metrics(night, 10.0)
+    peak_cost, _ = cost_metrics(peak, 10.0)
+    assert night_cost == pytest.approx(100 * 0.25 * 10.0 * PURCHASE_SHARE * 0.85)
+    assert peak_cost == pytest.approx(100 * 0.25 * 10.0 * PURCHASE_SHARE * 1.15)
+    assert night_cost < peak_cost
+
+
+def test_cost_metrics_penalize_overload():
+    records = [make_record(tick=48, station_kw={"st-1": 120.0}, limit_kw=100.0)]
+    purchase, penalty = cost_metrics(records, 10.0)
+    assert purchase == pytest.approx(120 * 0.25 * 6.0)
+    assert penalty == pytest.approx(20 * 0.25 * 6.0 * OVERLOAD_PENALTY_MULT)
+
+
+def test_cost_metrics_without_overload_have_no_penalty():
+    assert cost_metrics([make_record(tick=48)], 10.0)[1] == 0.0
+
+
+def test_storage_arbitrage_reduces_purchase_cost():
+    plain = [make_record(tick=72, station_kw={"st-1": 100.0}, limit_kw=200.0)]
+    with_storage = [make_record(tick=72, station_kw={"st-1": 100.0}, limit_kw=200.0,
+                                storage_discharge_kw=40.0)]
+    assert cost_metrics(with_storage, 10.0)[0] < cost_metrics(plain, 10.0)[0]
+
+
+def decision(deficit=False, fallback=False):
+    return GridDecision(
+        tick=0, substation_limit_kw=100.0, storage_kw=0.0, requested_kw=0.0,
+        allocated_kw={}, multipliers={}, deficit=deficit, fallback=fallback,
+    )
+
+
+def test_decision_counts():
+    decisions = [decision(), decision(deficit=True), decision(deficit=True, fallback=True)]
+    assert decision_counts(decisions) == (2, 1)
+
+
+def test_station_orders_include_all_kinds(finished_sim):
+    total = sum(len(station_orders(station)) for station in finished_sim.stations)
+    assert total >= len([ev for ev in finished_sim.evs if ev.state == EVState.DONE])
+
+
+def test_vehicle_metrics_add_up(finished_sim):
+    metrics = vehicle_metrics(finished_sim)
+    assert metrics.total == len(finished_sim.evs)
+    assert (
+        metrics.done + metrics.missed + metrics.no_station + metrics.unfinished
+        == metrics.total
+    )
+    assert metrics.deadline_met == metrics.done
+    assert metrics.avg_wait_ticks >= 0.0
+    assert metrics.max_wait_ticks >= metrics.avg_wait_ticks
+
+
+def test_summary_is_consistent_with_agents(finished_sim):
+    summary = summarize(finished_sim)
+    assert summary.ticks == finished_sim.total_ticks
+    assert summary.energy_kwh == pytest.approx(
+        sum(station.delivered_kwh for station in finished_sim.stations)
+    )
+    done_cost = sum(ev.cost_rub for ev in finished_sim.evs if ev.state == EVState.DONE)
+    assert summary.revenue_rub >= done_cost - 1e-6
+    assert summary.vehicles_total == 30
+    assert summary.overload_ticks == 0
+    assert summary.storage_final_soc == pytest.approx(finished_sim.storage.soc)
+
+
+def test_summary_derived_values(finished_sim):
+    summary = summarize(finished_sim)
+    assert summary.avg_price_rub_per_kwh == pytest.approx(summary.revenue_rub / summary.energy_kwh)
+    assert summary.deadline_met_share == pytest.approx(summary.deadline_met / summary.vehicles_total)
+    assert summary.operator_cost_rub == pytest.approx(
+        summary.purchase_cost_rub + summary.overload_penalty_rub
+    )
+    assert summary.margin_rub == pytest.approx(summary.revenue_rub - summary.operator_cost_rub)
+
+
+def test_summary_to_dict_contains_derived_fields(finished_sim):
+    data = summarize(finished_sim).to_dict()
+    for key in ("energy_kwh", "overload_ticks", "avg_price_rub_per_kwh",
+                "deadline_met_share", "operator_cost_rub", "margin_rub"):
+        assert key in data
+
+
+def test_summary_without_storage_has_zero_storage_metrics():
+    config = replace(small_config(), storage=None)
+    sim = Simulation(config, generate_profiles(config, MODELS), warmup_days=1)
+    sim.run()
+    summary = summarize(sim)
+    assert summary.storage_charged_kwh == 0.0
+    assert summary.storage_discharged_kwh == 0.0
+    assert summary.storage_final_soc is None
+
+
+def test_summary_without_vehicles_is_empty():
+    config = replace(small_config(), ev_per_day=0)
+    sim = Simulation(config, [], warmup_days=1)
+    sim.run()
+    summary = summarize(sim)
+    assert summary.energy_kwh == 0.0
+    assert summary.deadline_met_share == 0.0
+    assert summary.avg_price_rub_per_kwh == 0.0
+
+
+def test_station_revenue_accumulates_with_energy():
+    config = small_config()
+    sim = Simulation(config, generate_profiles(config, MODELS), warmup_days=1)
+    sim.run(ticks=60)
+    for station in sim.stations:
+        if station.delivered_kwh > 0:
+            assert station.revenue_rub > 0
+            assert 7.0 <= station.revenue_rub / station.delivered_kwh <= 16.0
