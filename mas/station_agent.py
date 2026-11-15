@@ -48,6 +48,7 @@ class StationAgent(BaseAgent):
         self.rejected: list[tuple[str, str]] = []
         self.last_powers: dict[str, float] = {}
         self.delivered_kwh = 0.0
+        self.revenue_rub = 0.0
         self.completed: list[Order] = []
         self.base_tariff_rub = base_tariff_rub
         self.tariff_multiplier = 1.0
@@ -148,6 +149,7 @@ class StationAgent(BaseAgent):
             order.remaining_kwh = max(0.0, order.remaining_kwh - energy)
             order.cost_rub += energy * price_per_kwh
             self.delivered_kwh += energy
+            self.revenue_rub += energy * price_per_kwh
             if order.remaining_kwh <= EPS:
                 order.remaining_kwh = 0.0
                 order.finish_tick = self.current_tick + 1
