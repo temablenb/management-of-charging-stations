@@ -7,6 +7,7 @@ from mas.ev_agent import EVAgent, EVProfile, StationInfo
 from mas.ev_generator import vehicle_rng
 from mas.grid_agent import GridAgent
 from mas.history import warmup_history
+from mas.metrics import TickRecord, collect_tick
 from mas.scenario import ScenarioConfig
 from mas.station_agent import StationAgent
 from mas.storage_agent import StorageAgent
@@ -25,6 +26,7 @@ class Simulation:
     ) -> None:
         self.config = config
         self.profiles = list(profiles)
+        self.records: list[TickRecord] = []
         self.bus = MessageBus()
         self.clock = SimulationClock()
         self.grid = GridAgent(
@@ -96,6 +98,7 @@ class Simulation:
         self.bus.deliver()
         for ev in self.evs:
             ev.process_inbox()
+        self.records.append(collect_tick(self, tick))
         for station in self.stations:
             station.end_tick(tick)
         if self.storage:
