@@ -48,3 +48,35 @@ def run_scenario(
     simulation = Simulation(config, profiles, warmup_days=warmup_days)
     simulation.run()
     return simulation, summarize(simulation)
+
+
+def format_summary(config: ScenarioConfig, summary: RunSummary) -> str:
+    """Итоги прогона в виде текста для консоли."""
+    storage = "есть" if config.storage else "нет"
+    lines = [
+        f"Сценарий: {config.name} ({config.days} сут., seed {config.seed})",
+        f"Лимит подстанции: {config.substation_limit_kw:.0f} кВт, накопитель: {storage}",
+        f"Выдано энергии: {summary.energy_kwh:.1f} кВт·ч",
+        f"Выручка от водителей: {summary.revenue_rub:.0f} руб "
+        f"(средняя цена {summary.avg_price_rub_per_kwh:.2f} руб/кВт·ч)",
+        f"Затраты оператора: {summary.operator_cost_rub:.0f} руб "
+        f"(закупка {summary.purchase_cost_rub:.0f}, штраф {summary.overload_penalty_rub:.0f})",
+        f"Пиковая нагрузка: {summary.peak_load_kw:.1f} кВт, "
+        f"превышений лимита: {summary.overload_ticks} тактов "
+        f"(максимум {summary.max_overload_kw:.1f} кВт)",
+        f"Тактов дефицита мощности: {summary.deficit_ticks} "
+        f"(запасной вариант: {summary.fallback_ticks})",
+        f"Автомобили: {summary.vehicles_total}, успели к дедлайну "
+        f"{summary.deadline_met} ({summary.deadline_met_share:.1%}), "
+        f"опоздали {summary.missed}, без станции {summary.no_station}, "
+        f"не завершены к концу {summary.unfinished}",
+        f"Ожидание в очереди: в среднем {summary.avg_wait_ticks:.2f} такта, "
+        f"максимум {summary.max_wait_ticks} тактов, одновременно ждали до {summary.max_waiting}",
+    ]
+    if config.storage:
+        lines.append(
+            f"Накопитель: заряжено {summary.storage_charged_kwh:.1f} кВт·ч, "
+            f"отдано {summary.storage_discharged_kwh:.1f} кВт·ч, "
+            f"заряд в конце {summary.storage_final_soc:.0%}"
+        )
+    return "\n".join(lines)
