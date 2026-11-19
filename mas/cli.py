@@ -3,6 +3,9 @@
 Пример: python -m mas.cli scenarios/evening_peak.json --days 2 --json result.json
 """
 from dataclasses import replace
+import argparse
+import json
+import sys
 from pathlib import Path
 
 from mas.engine import DEFAULT_WARMUP_DAYS, Simulation
@@ -80,3 +83,49 @@ def format_summary(config: ScenarioConfig, summary: RunSummary) -> str:
             f"заряд в конце {summary.storage_final_soc:.0%}"
         )
     return "\n".join(lines)
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m mas.cli",
+        description="Мультиагентная симуляция сети зарядных станций.",
+    )
+    parser.add_argument("scenario", help="путь к JSON-файлу сценария")
+    parser.add_argument("--days", type=int, help="число суток вместо указанного в сценарии")
+    parser.add_argument("--seed", type=int, help="seed вместо указанного в сценарии")
+    parser.add_argument("--ev-per-day", type=int, help="число автомобилей в сутки")
+    parser.add_argument("--limit", type=float, help="лимит подстанции, кВт")
+    parser.add_argument("--no-storage", action="store_true", help="убрать накопитель")
+    parser.add_argument("--warmup-days", type=int, default=DEFAULT_WARMUP_DAYS,
+                        help="суток предыстории для прогноза (по умолчанию 3)")
+    parser.add_argument("--models", default=str(DEFAULT_MODELS_PATH),
+                        help="каталог моделей электромобилей (JSON)")
+    parser.add_argument("--json", dest="json_path", help="сохранить итоги в JSON-файл")
+    return parser
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        config = apply_overrides(
+            load_scenario(args.scenario),
+            days=args.days, seed=args.seed, ev_per_day=args.ev_per_day,
+            limit_kw=args.limit, no_storage=args.no_storage,
+        )
+        models = load_ev_models(args.models)
+        _, summary = run_scenario(config, models, warmup_days=args.warmup_days)
+    except (OSError, ValueError) as error:
+        print(f"Ошибка: {error}", file=sys.stderr)
+        return 2
+    print(format_summary(config, summary))
+    if args.json_path:
+        payload = {"scenario": config.name, "seed": config.seed, "days": config.days,
+                   "summary": summary.to_dict()}
+        Path(args.json_path).write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
