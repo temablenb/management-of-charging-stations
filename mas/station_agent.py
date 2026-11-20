@@ -9,7 +9,7 @@ from mas.charging_plan import (
     max_useful_power,
     split_power,
 )
-from mas.charging_queue import ChargingQueue, Order
+from mas.charging_queue import PREPAID_BONUS_TICKS, ChargingQueue, Order
 from mas.clock import TICKS_PER_HOUR, hour_of_tick
 from mas.forecast import DEFAULT_HORIZON, forecast_load, peak_hours
 from mas.grid_agent import GRID_ID
@@ -35,13 +35,17 @@ class StationAgent(BaseAgent):
             config: StationConfig,
             grid_id: str = GRID_ID,
             base_tariff_rub: float = 10.0,
+            fifo: bool = False,
     ) -> None:
         if base_tariff_rub <= 0:
             raise ValueError("Базовый тариф должен быть положительным")
         super().__init__(config.station_id, bus)
         self.config = config
         self.grid_id = grid_id
-        self.queue = ChargingQueue(config.slots)
+        self.fifo = fifo
+        self.queue = ChargingQueue(
+            config.slots, prepaid_bonus=0 if fifo else PREPAID_BONUS_TICKS
+        )
         self.current_tick = 0
         # отказы: пары (идентификатор автомобиля, причина); отдельного сообщения-отказа нет,
         # автомобиль заранее выбирает станцию с подходящим разъёмом
