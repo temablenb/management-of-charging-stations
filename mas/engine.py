@@ -29,29 +29,50 @@ class Simulation:
         self.records: list[TickRecord] = []
         self.bus = MessageBus()
         self.clock = SimulationClock()
-        self.grid = GridAgent(
-            self.bus,
-            limit_kw=config.substation_limit_kw,
-            tariff_min_mult=config.tariff_min_mult,
-            tariff_max_mult=config.tariff_max_mult,
-        )
-        self.stations = [
-            StationAgent(self.bus, station_config, base_tariff_rub=config.base_tariff_rub)
-            for station_config in config.stations
-        ]
-        self.storage = StorageAgent(self.bus, config.storage) if config.storage else None
+        self.grid = self._create_grid()
+        self.stations = self._create_stations()
+        self.storage = self._create_storage()
         infos = tuple(
             StationInfo(item.station_id, item.connector, item.max_power_kw)
             for item in config.stations
         )
         self.evs = [
-            EVAgent(self.bus, profile, infos, vehicle_rng(config.seed, profile.ev_id))
+            EVAgent(
+                self.bus,
+                self._vehicle_profile(profile),
+                infos,
+                vehicle_rng(config.seed, profile.ev_id),
+            )
             for profile in self.profiles
         ]
-        warmup_rng = np.random.default_rng([config.seed, 7])
+        self._seed_history(warmup_days)
+
+    def _create_grid(self) -> GridAgent:
+        return GridAgent(
+            self.bus,
+            limit_kw=self.config.substation_limit_kw,
+            tariff_min_mult=self.config.tariff_min_mult,
+            tariff_max_mult=self.config.tariff_max_mult,
+        )
+
+    def _create_stations(self) -> list[StationAgent]:
+        return [
+            StationAgent(self.bus, item, base_tariff_rub=self.config.base_tariff_rub)
+            for item in self.config.stations
+        ]
+
+    def _create_storage(self) -> StorageAgent | None:
+        return StorageAgent(self.bus, self.config.storage) if self.config.storage else None
+
+    def _vehicle_profile(self, profile: EVProfile) -> EVProfile:
+        """Профиль, с которым автомобиль входит в симуляцию (наследники могут менять)."""
+        return profile
+
+    def _seed_history(self, warmup_days: int) -> None:
+        warmup_rng = np.random.default_rng([self.config.seed, 7])
         for station in self.stations:
             station.seed_history(
-                warmup_history(config, station.config, warmup_days, warmup_rng)
+                warmup_history(self.config, station.config, warmup_days, warmup_rng)
             )
 
     @property
