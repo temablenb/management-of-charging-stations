@@ -40,19 +40,21 @@ def waiting_ticks(order: Order, tick: int) -> int:
     return max(0, tick - order.arrival_tick)
 
 
-def priority_score(order: Order, tick: int) -> int:
-    """Балл приоритета: время ожидания плюс бонус предоплаты. Чем больше, тем раньше."""
-    bonus = PREPAID_BONUS_TICKS if order.prepaid else 0
+def priority_score(order: Order, tick: int, prepaid_bonus: int = PREPAID_BONUS_TICKS) -> int:
+    bonus = prepaid_bonus if order.prepaid else 0
     return waiting_ticks(order, tick) + bonus
 
 
 class ChargingQueue:
     """Места зарядки и список ожидания."""
 
-    def __init__(self, slots: int) -> None:
+    def __init__(self, slots: int, prepaid_bonus: int = PREPAID_BONUS_TICKS) -> None:
         if slots < 1:
             raise ValueError("На станции должно быть хотя бы одно место")
+        if prepaid_bonus < 0:
+            raise ValueError("Бонус предоплаты не может быть отрицательным")
         self.slots = slots
+        self.prepaid_bonus = prepaid_bonus
         self._active: dict[str, Order] = {}
         self._waiting: dict[str, Order] = {}
 
@@ -81,7 +83,11 @@ class ChargingQueue:
         """Ожидающие заявки в порядке приоритета."""
         return sorted(
             self._waiting.values(),
-            key=lambda order: (-priority_score(order, tick), order.arrival_tick, order.ev_id),
+            key=lambda order: (
+                -priority_score(order, tick, self.prepaid_bonus),
+                order.arrival_tick,
+                order.ev_id,
+            ),
         )
 
     def position(self, ev_id: str, tick: int) -> int:

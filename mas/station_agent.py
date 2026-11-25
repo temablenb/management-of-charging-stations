@@ -9,7 +9,7 @@ from mas.charging_plan import (
     max_useful_power,
     split_power,
 )
-from mas.charging_queue import ChargingQueue, Order
+from mas.charging_queue import PREPAID_BONUS_TICKS, ChargingQueue, Order
 from mas.clock import TICKS_PER_HOUR, hour_of_tick
 from mas.forecast import DEFAULT_HORIZON, forecast_load, peak_hours
 from mas.grid_agent import GRID_ID
@@ -35,19 +35,24 @@ class StationAgent(BaseAgent):
             config: StationConfig,
             grid_id: str = GRID_ID,
             base_tariff_rub: float = 10.0,
+            fifo: bool = False,
     ) -> None:
         if base_tariff_rub <= 0:
             raise ValueError("Базовый тариф должен быть положительным")
         super().__init__(config.station_id, bus)
         self.config = config
         self.grid_id = grid_id
-        self.queue = ChargingQueue(config.slots)
+        self.fifo = fifo
+        self.queue = ChargingQueue(
+            config.slots, prepaid_bonus=0 if fifo else PREPAID_BONUS_TICKS
+        )
         self.current_tick = 0
         # отказы: пары (идентификатор автомобиля, причина); отдельного сообщения-отказа нет,
         # автомобиль заранее выбирает станцию с подходящим разъёмом
         self.rejected: list[tuple[str, str]] = []
         self.last_powers: dict[str, float] = {}
         self.delivered_kwh = 0.0
+        self.revenue_rub = 0.0
         self.completed: list[Order] = []
         self.base_tariff_rub = base_tariff_rub
         self.tariff_multiplier = 1.0
@@ -56,6 +61,7 @@ class StationAgent(BaseAgent):
         self.interrupted: list[Order] = []
         self.hourly_history: list[float] = []
         self._hour_buffer: list[float] = []
+        self._forecast_cache: tuple | None = None
 
     @property
     def max_power_kw(self) -> float:
@@ -147,6 +153,7 @@ class StationAgent(BaseAgent):
             order.remaining_kwh = max(0.0, order.remaining_kwh - energy)
             order.cost_rub += energy * price_per_kwh
             self.delivered_kwh += energy
+            self.revenue_rub += energy * price_per_kwh
             if order.remaining_kwh <= EPS:
                 order.remaining_kwh = 0.0
                 order.finish_tick = self.current_tick + 1
@@ -177,10 +184,21 @@ class StationAgent(BaseAgent):
 
     def build_forecast(self, horizon: int = DEFAULT_HORIZON,
                        temperatures=None) -> tuple[float, ...]:
-        """Прогноз нагрузки станции на horizon часов, начиная с текущего часа."""
-        return forecast_load(
-            self.hourly_history, horizon, self.config.max_power_kw, temperatures
-        )
+        """Прогноз нагрузки станции на horizon часов, начиная с текущего часа.
+
+        История меняется раз в час, поэтому без температур прогноз пересчитывается
+        только при появлении нового часа, а в остальное время берётся из кэша.
+        """
+        if temperatures is not None:
+            return forecast_load(
+                self.hourly_history, horizon, self.config.max_power_kw, temperatures
+            )
+        key = (len(self.hourly_history), horizon)
+        if self._forecast_cache is not None and self._forecast_cache[0] == key:
+            return self._forecast_cache[1]
+        forecast = forecast_load(self.hourly_history, horizon, self.config.max_power_kw)
+        self._forecast_cache = (key, forecast)
+        return forecast
 
     def forecast_peak_hours(self, forecast: tuple[float, ...]) -> tuple[int, ...]:
         """Часы суток, в которые ожидается пик нагрузки по переданному прогнозу."""
