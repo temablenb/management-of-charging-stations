@@ -8,6 +8,7 @@ import json
 import sys
 from pathlib import Path
 
+from mas.baseline import BaselineSimulation
 from mas.engine import DEFAULT_WARMUP_DAYS, Simulation
 from mas.ev_generator import generate_profiles
 from mas.ev_models import load_ev_models
@@ -53,10 +54,23 @@ def run_scenario(
     return simulation, summarize(simulation)
 
 
-def format_summary(config: ScenarioConfig, summary: RunSummary) -> str:
+def run_baseline(
+    config: ScenarioConfig, models
+) -> tuple[BaselineSimulation, RunSummary]:
+    """Прогоняет базовый сценарий (без координации агентов) на том же потоке автомобилей."""
+    profiles = generate_profiles(config, models)
+    simulation = BaselineSimulation(config, profiles)
+    simulation.run()
+    return simulation, summarize(simulation)
+
+
+def format_summary(config: ScenarioConfig, summary: RunSummary, mode: str = "mas") -> str:
     """Итоги прогона в виде текста для консоли."""
     storage = "есть" if config.storage else "нет"
-    lines = [
+    lines = [f"Сценарий: {config.name} ({config.days} сут., seed {config.seed})"]
+    if mode == "baseline":
+        lines.append("Режим: базовый (без координации агентов, плоский тариф, очередь по приезду)")
+    lines += [
         f"Сценарий: {config.name} ({config.days} сут., seed {config.seed})",
         f"Лимит подстанции: {config.substation_limit_kw:.0f} кВт, накопитель: {storage}",
         f"Выдано энергии: {summary.energy_kwh:.1f} кВт·ч",
