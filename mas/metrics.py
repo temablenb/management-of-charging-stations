@@ -1,5 +1,5 @@
 """Метрики симуляции: состояние сети по тактам и итоги прогона."""
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 
 from mas.charging_plan import TICK_HOURS
 from mas.ev_agent import EVState
@@ -211,6 +211,12 @@ class RunSummary:
     def deadline_met_share(self) -> float:
         """Доля автомобилей, получивших нужную энергию к дедлайну."""
         return self.deadline_met / self.vehicles_total if self.vehicles_total else 0.0
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "RunSummary":
+        """Восстанавливает итоги из словаря (производные поля to_dict игнорируются)."""
+        names = {item.name for item in fields(cls)}
+        return cls(**{key: value for key, value in data.items() if key in names})
 
     def to_dict(self) -> dict:
         data = asdict(self)
