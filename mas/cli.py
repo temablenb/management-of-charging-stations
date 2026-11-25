@@ -14,6 +14,8 @@ from mas.ev_generator import generate_profiles
 from mas.ev_models import load_ev_models
 from mas.metrics import RunSummary, summarize
 from mas.scenario import ScenarioConfig, load_scenario
+from mas.comparison import format_comparison, run_comparison
+from mas.runs import save_run
 
 DEFAULT_MODELS_PATH = Path(__file__).resolve().parent.parent / "scenarios" / "ev_models.json"
 
@@ -115,6 +117,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--models", default=str(DEFAULT_MODELS_PATH),
                         help="каталог моделей электромобилей (JSON)")
     parser.add_argument("--json", dest="json_path", help="сохранить итоги в JSON-файл")
+    parser.add_argument("--save", dest="save_dir", metavar="ПАПКА",
+                        help="сохранить прогоны (итоги и состояние по тактам) в папку")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--baseline", action="store_true",
+                      help="запустить только базовый сценарий")
+    mode.add_argument("--compare", action="store_true",
+                      help="запустить оба сценария и вывести таблицу сравнения")
     return parser
 
 
@@ -127,17 +136,37 @@ def main(argv=None) -> int:
             limit_kw=args.limit, no_storage=args.no_storage,
         )
         models = load_ev_models(args.models)
-        _, summary = run_scenario(config, models, warmup_days=args.warmup_days)
+        if args.compare:
+            comparison, mas_sim, baseline_sim = run_comparison(
+                config, models, warmup_days=args.warmup_days
+            )
+            print(format_comparison(comparison))
+            payload = comparison.to_dict()
+            saved = [("mas", comparison.mas, mas_sim), ("baseline", comparison.baseline, baseline_sim)]
+        elif args.baseline:
+            simulation, summary = run_baseline(config, models)
+            print(format_summary(simulation.config, summary, mode="baseline"))
+            payload = {"scenario": config.name, "seed": config.seed, "days": config.days,
+                       "mode": "baseline", "summary": summary.to_dict()}
+            saved = [("baseline", summary, simulation)]
+        else:
+            simulation, summary = run_scenario(config, models, warmup_days=args.warmup_days)
+            print(format_summary(config, summary))
+            payload = {"scenario": config.name, "seed": config.seed, "days": config.days,
+                       "mode": "mas", "summary": summary.to_dict()}
+            saved = [("mas", summary, simulation)]
+        if args.save_dir:
+            for mode, summary, simulation in saved:
+                path = save_run(args.save_dir, mode, config.name, config.seed, config.days,
+                                summary, simulation.records)
+                print(f"Прогон сохранён: {path}")
+        if args.json_path:
+            Path(args.json_path).write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
     except (OSError, ValueError) as error:
         print(f"Ошибка: {error}", file=sys.stderr)
         return 2
-    print(format_summary(config, summary))
-    if args.json_path:
-        payload = {"scenario": config.name, "seed": config.seed, "days": config.days,
-                   "summary": summary.to_dict()}
-        Path(args.json_path).write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
     return 0
 
 
