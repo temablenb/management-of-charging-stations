@@ -3,16 +3,19 @@ from pathlib import Path
 
 import pytest
 
+from mas.baseline import BaselineSimulation
 from mas.cli import (
     apply_overrides,
     build_parser,
     format_summary,
     main,
+    run_baseline,
     run_scenario,
 )
 from mas.engine import Simulation
 from mas.ev_models import load_ev_models
 from mas.metrics import RunSummary
+from mas.runs import list_runs, load_run
 from mas.scenario import load_scenario
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -151,3 +154,96 @@ def test_main_is_reproducible(capsys):
     main([str(SCENARIOS / "default.json")] + SMALL)
     second = capsys.readouterr().out
     assert first == second
+
+
+def test_parser_new_options_have_defaults():
+    args = build_parser().parse_args(["scenarios/default.json"])
+    assert not args.baseline and not args.compare
+    assert args.save_dir is None
+
+
+def test_parser_reads_new_options():
+    args = build_parser().parse_args(["x.json", "--compare", "--save", "runs"])
+    assert args.compare and not args.baseline
+    assert args.save_dir == "runs"
+
+
+def test_baseline_and_compare_are_mutually_exclusive(capsys):
+    with pytest.raises(SystemExit) as error:
+        build_parser().parse_args(["x.json", "--baseline", "--compare"])
+    assert error.value.code == 2
+    assert "not allowed" in capsys.readouterr().err
+
+
+def test_run_baseline_returns_baseline_simulation_and_summary():
+    config = apply_overrides(scenario("default"), days=1, ev_per_day=15)
+    simulation, summary = run_baseline(config, MODELS)
+    assert isinstance(simulation, BaselineSimulation)
+    assert isinstance(summary, RunSummary)
+    assert simulation.storage is None
+    assert summary.vehicles_total == 15
+
+
+def test_format_summary_baseline_mentions_mode():
+    config = apply_overrides(scenario("default"), days=1, ev_per_day=15)
+    simulation, summary = run_baseline(config, MODELS)
+    text = format_summary(simulation.config, summary, mode="baseline")
+    assert "Режим: базовый" in text
+    assert "накопитель: нет" in text
+
+
+def test_format_summary_default_mode_has_no_mode_line():
+    config = apply_overrides(scenario("default"), days=1, ev_per_day=15)
+    _, summary = run_scenario(config, MODELS, warmup_days=1)
+    assert "Режим:" not in format_summary(config, summary)
+
+
+def test_main_baseline_prints_mode(capsys):
+    code = main([str(SCENARIOS / "default.json"), "--baseline"] + SMALL)
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "Режим: базовый" in output
+
+
+def test_main_compare_prints_table(capsys):
+    code = main([str(SCENARIOS / "default.json"), "--compare"] + SMALL)
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "Сравнение: default (1 сут., seed 42)" in output
+    assert "Затраты оператора" in output and "Изменение MAS" in output
+
+
+def test_main_compare_writes_comparison_json(tmp_path, capsys):
+    target = tmp_path / "cmp.json"
+    code = main([str(SCENARIOS / "default.json"), "--compare"] + SMALL + ["--json", str(target)])
+    capsys.readouterr()
+    assert code == 0
+    payload = json.loads(target.read_text(encoding="utf-8"))
+    assert payload["scenario"] == "default"
+    assert "baseline" in payload and "mas" in payload and payload["rows"]
+
+
+def test_main_single_run_json_has_mode(tmp_path, capsys):
+    target = tmp_path / "one.json"
+    main([str(SCENARIOS / "default.json"), "--baseline"] + SMALL + ["--json", str(target)])
+    capsys.readouterr()
+    assert json.loads(target.read_text(encoding="utf-8"))["mode"] == "baseline"
+
+
+def test_main_save_stores_single_run(tmp_path, capsys):
+    code = main([str(SCENARIOS / "default.json")] + SMALL + ["--save", str(tmp_path)])
+    output = capsys.readouterr().out
+    assert code == 0
+    assert "Прогон сохранён:" in output
+    infos = list_runs(tmp_path)
+    assert [(info.mode, info.scenario, info.days) for info in infos] == [("mas", "default", 1)]
+
+
+def test_main_compare_save_stores_both_runs(tmp_path, capsys):
+    main([str(SCENARIOS / "default.json"), "--compare"] + SMALL + ["--save", str(tmp_path)])
+    capsys.readouterr()
+    infos = list_runs(tmp_path)
+    assert {info.mode for info in infos} == {"mas", "baseline"}
+    saved = load_run(next(info.path for info in infos if info.mode == "mas"))
+    assert len(saved.records) == 96
+    assert saved.summary.vehicles_total == 15
