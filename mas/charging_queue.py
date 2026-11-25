@@ -55,6 +55,8 @@ class ChargingQueue:
             raise ValueError("Бонус предоплаты не может быть отрицательным")
         self.slots = slots
         self.prepaid_bonus = prepaid_bonus
+        self._active: dict[str, Order] = {}
+        self._waiting: dict[str, Order] = {}
 
     def __contains__(self, ev_id: str) -> bool:
         return ev_id in self._active or ev_id in self._waiting
