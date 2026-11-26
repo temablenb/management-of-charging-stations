@@ -11,7 +11,7 @@ from database import (
 )
 from ui.auth_screen import render_auth_screen
 from ui.helpers import restore_session
-from ui.legacy.admin_panel import render_admin_interface
+from ui.admin_app import render_admin_app
 from ui.legacy.user_cabinet import render_user_cabinet
 
 _original_connect = sqlite3.connect
@@ -58,6 +58,6 @@ if not st.session_state.logged_in:
 else:
     user = st.session_state.current_user
     if user and user.get('role') == 'admin':
-        render_admin_interface()
+        render_admin_app()
     else:
         render_user_cabinet()
