@@ -6,16 +6,14 @@ from datetime import timedelta
 import pydeck as pdk
 from database import (
     init_schema, get_history, get_forecasts, get_tariffs,
-    get_stations_info, update_station_load_from_sessions, get_user_by_id,
-    init_logs_table, get_logs, get_system_stats, add_log,
+    get_stations_info, update_station_load_from_sessions, init_logs_table, get_logs, get_system_stats, add_log,
     get_ev_models, add_custom_ev_model, set_station_active,
     init_accounts_table, get_user_balance, update_user_balance,
     get_user_transactions, get_user_connector_type, retrain_forecasts_for_stations
 )
 from data_generator import generate_synthetic_data
 from ml_forecast import train_and_predict_station
-from optimizer import optimize_load, get_expected_peak_load, get_current_station_loads
-from session_store import save_session_to_disk, load_session_from_disk, clear_session_from_disk
+from optimizer import optimize_load, get_expected_peak_load
 from auth import (
     init_users_table, login_user, register_user,
     get_user_sessions, get_favorite_stations, toggle_favorite,
@@ -27,6 +25,8 @@ from config import (
     SUBSTATION_LIMIT_KW, BASE_TARIFF_RUB, DB_PATH,
     MAP_CENTER_LAT, MAP_CENTER_LON, MAP_ZOOM
 )
+from ui.helpers import get_status_color, get_current_load_data, get_best_station, calculate_total_load, do_optimize, \
+    restore_session, save_session, clear_session
 
 EV_PLACEHOLDER = "— Выбрать из списка —"
 _original_connect = sqlite3.connect
@@ -66,125 +66,7 @@ for key, default in [
     if key not in st.session_state:
         st.session_state[key] = default
 
-
-def restore_session():
-    if st.session_state.get("logged_in"):
-        return
-    data = load_session_from_disk()
-    if not data:
-        return
-    try:
-        role = data.get("role", "user")
-        if role == "admin":
-            st.session_state.logged_in = True
-            st.session_state.current_user = {
-                "id": 0, "username": "admin", "role": "admin"
-            }
-        else:
-            user = get_user_by_id(int(data["id"]))
-            if user:
-                st.session_state.logged_in = True
-                st.session_state.current_user = user
-            else:
-                clear_session_from_disk()
-    except Exception:
-        clear_session_from_disk()
-
-
-def save_session(user: dict):
-    save_session_to_disk(user)
-
-
-def clear_session():
-    clear_session_from_disk()
-    st.session_state.logged_in = False
-    st.session_state.current_user = None
-
-
 restore_session()
-
-
-def get_status_color(ratio, is_active=True):
-    if not is_active:
-        return [128, 128, 128]
-    if ratio < 0.4:
-        return [40, 167, 69]
-    elif ratio < 0.7:
-        return [255, 193, 7]
-    else:
-        return [220, 53, 69]
-
-
-def get_current_load_data():
-    stations_df = get_stations_info()
-    hist = get_history()
-    tariffs = get_tariffs()
-
-    if not hist.empty:
-        hist["timestamp"] = pd.to_datetime(hist["timestamp"])
-        hist_latest = hist.sort_values("timestamp").groupby("station_id").last().reset_index()
-        hist_data = hist_latest[["station_id", "load_kw"]].copy()
-    else:
-        hist_data = pd.DataFrame(columns=["station_id", "load_kw"])
-
-    if not tariffs.empty:
-        tariffs["timestamp"] = pd.to_datetime(tariffs["timestamp"])
-        tariff_latest = tariffs.sort_values("timestamp").groupby("station_id").last().reset_index()
-        tariff_data = tariff_latest[["station_id", "tariff_multiplier", "new_price"]].copy()
-        source = "optimization"
-    else:
-        tariff_data = pd.DataFrame(columns=["station_id", "tariff_multiplier", "new_price"])
-        source = "history"
-
-    merged = stations_df.merge(hist_data, left_on="id", right_on="station_id", how="left")
-
-    if not tariff_data.empty:
-        merged = merged.merge(tariff_data, left_on="id", right_on="station_id", how="left", suffixes=('', '_t'))
-
-    merged['load_kw'] = merged['load_kw'].fillna(0)
-    merged['multiplier'] = merged.get('tariff_multiplier', pd.Series([1.0] * len(merged))).fillna(1.0)
-    merged['price'] = merged.get('new_price', pd.Series([BASE_TARIFF_RUB] * len(merged))).fillna(BASE_TARIFF_RUB)
-
-    if 'tariff_multiplier' in merged.columns:
-        merged['multiplier'] = merged['tariff_multiplier'].fillna(1.0)
-    if 'new_price' in merged.columns:
-        merged['price'] = merged['new_price'].fillna(BASE_TARIFF_RUB)
-
-    return merged, stations_df, source
-
-
-def get_best_station(load_data: pd.DataFrame, active_counts: dict, user_connector: str = None) -> dict | None:
-    if load_data is None or load_data.empty:
-        return None
-    candidates = []
-    max_price = load_data['price'].max() or BASE_TARIFF_RUB
-
-    for _, row in load_data.iterrows():
-        sid = int(row['id'])
-        if not row.get('is_active', True):
-            continue
-        station_connector = row.get('connector_type', 'CCS')
-        if user_connector and station_connector and user_connector != station_connector:
-            continue
-        slots_left = 5 - active_counts.get(sid, 0)
-        if slots_left <= 0:
-            continue
-        ratio = row['load_kw'] / row['max_power_kw'] if row['max_power_kw'] > 0 else 0
-        price_norm = row['price'] / max_price if max_price > 0 else 1.0
-        score = (1 - ratio) * 0.5 + (1 - price_norm) * 0.3 + (slots_left / 5) * 0.2
-        candidates.append({
-            "id": sid,
-            "name": row['name'],
-            "location": row['location'],
-            "price": row['price'],
-            "ratio": ratio,
-            "slots_left": slots_left,
-            "score": score
-        })
-
-    if not candidates:
-        return None
-    return max(candidates, key=lambda x: x['score'])
 
 
 def render_map(load_data):
@@ -240,27 +122,6 @@ def render_map(load_data):
         map_provider="mapbox"
     )
     st.pydeck_chart(deck_map)
-
-
-def calculate_total_load():
-    load_df = get_current_station_loads()
-    if load_df is None or load_df.empty:
-        return 0.0, "none"
-    active_load = load_df[load_df.get('is_active', True) == True]['current_load'].sum()
-    return active_load, "optimization"
-
-
-def do_optimize():
-    try:
-        optimize_load()
-        from database import get_stations_info, retrain_forecasts_for_stations
-        stations = get_stations_info()
-        retrained = retrain_forecasts_for_stations(stations['id'].tolist(), min_hours_since_retrain=12)
-        if retrained:
-            add_log("SYSTEM", f"Переобучены прогнозы для {len(retrained)} станций",
-                   f"Станции: {retrained}")
-    except Exception as e:
-        print(f"[optimize] {e}")
 
 
 def render_auth_screen():
