@@ -1,11 +1,13 @@
 import sqlite3
+
 import streamlit as st
-from database import (
-    init_schema, init_logs_table, init_accounts_table
-)
-from data_generator import generate_synthetic_data
+
 from auth import (
     init_users_table
+)
+from data_generator import generate_synthetic_data
+from database import (
+    init_schema, init_logs_table, init_accounts_table
 )
 from ui.auth_screen import render_auth_screen
 from ui.helpers import restore_session
