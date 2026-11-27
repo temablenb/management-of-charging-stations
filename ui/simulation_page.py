@@ -9,7 +9,7 @@ from mas.ev_models import load_ev_models
 from ui.results_view import render_results
 from ui.run_view import RunView
 from ui.sim_runner import run_pair
-from ui.runs_store import RUNS_DIR, save_pair
+from ui.runs_store import RUNS_DIR, save_pair, saved_keys
 
 VIEW_KEY = "sim_view"
 
@@ -68,9 +68,27 @@ def render_simulation_page() -> None:
     st.subheader("Симуляция мультиагентной системы")
     config = scenario_form()
     save = st.checkbox("Сохранять прогон в папку runs", value=True, key="sim_save")
+    render_saved_runs()
     if config is not None and st.button("Запустить симуляцию", type="primary", key="sim_run"):
         view = run_simulation(config)
         st.session_state[VIEW_KEY] = view
         if save:
             paths = save_pair(view)
             st.success(f"Прогон сохранён: {', '.join(path.name for path in paths)}")
+
+
+def render_saved_runs() -> None:
+    st.markdown("**Сохранённые прогоны**")
+    keys = saved_keys()
+    if not keys:
+        st.caption("Пока нет сохранённых прогонов.")
+        return
+    labels = {f"{name} · seed {seed} · {days} сут.": (name, seed, days) for name, seed, days in keys}
+    choice = st.selectbox("Прогон", list(labels), key="sim_saved_choice")
+    if st.button("Открыть", key="sim_open_saved"):
+        try:
+            st.session_state[VIEW_KEY] = RunView.from_saved(RUNS_DIR, *labels[choice])
+        except ValueError as error:
+            st.error(str(error))
+            return
+        st.rerun()
