@@ -45,15 +45,15 @@ def station_load_figure(records: list[TickRecord], title: str = "Нагрузк�
 
 
 def total_load_figure(
-    mas_records: list[TickRecord],
-    baseline_records: list[TickRecord],
-    title: str = "Суммарная нагрузка на подстанцию",
+        mas_records: list[TickRecord],
+        baseline_records: list[TickRecord],
+        title: str = "Суммарная нагрузка на подстанцию",
 ) -> go.Figure:
     """Нагрузка на подстанцию в двух сценариях относительно лимита."""
     figure = go.Figure()
     for name, records, color in (
-        ("Мультиагентная система", mas_records, "#2a9d8f"),
-        ("Базовый сценарий", baseline_records, "#e76f51"),
+            ("Мультиагентная система", mas_records, "#2a9d8f"),
+            ("Базовый сценарий", baseline_records, "#e76f51"),
     ):
         figure.add_trace(go.Scatter(
             x=_hours(records), y=[record.grid_kw for record in records],
@@ -63,5 +63,61 @@ def total_load_figure(
     figure.update_layout(
         title=title, xaxis_title=X_TITLE, yaxis_title="Мощность, кВт",
         height=380, legend=dict(orientation="h"),
+    )
+    return figure
+
+
+def mean_price(record: TickRecord) -> float:
+    return sum(record.price.values()) / len(record.price) if record.price else 0.0
+
+
+def price_figure(
+        mas_records: list[TickRecord],
+        baseline_records: list[TickRecord],
+        title: str = "Тариф по времени",
+) -> go.Figure:
+    """Цена по станциям в мультиагентной системе и средняя плоская цена базового сценария."""
+    figure = go.Figure()
+    if mas_records:
+        x = _hours(mas_records)
+        for station_id in mas_records[0].price:
+            figure.add_trace(go.Scatter(
+                x=x, y=[record.price[station_id] for record in mas_records],
+                name=station_id, mode="lines", line=dict(width=1), opacity=0.6,
+            ))
+    figure.add_trace(go.Scatter(
+        x=_hours(baseline_records), y=[mean_price(record) for record in baseline_records],
+        name="Базовый (плоский тариф)", mode="lines", line=dict(color="black", dash="dash"),
+    ))
+    figure.update_layout(
+        title=title, xaxis_title=X_TITLE, yaxis_title="руб/кВт·ч",
+        height=380, legend=dict(orientation="h"),
+    )
+    return figure
+
+
+def soc_figure(records: list[TickRecord], title: str = "Накопитель энергии") -> go.Figure | None:
+    """Уровень заряда накопителя и мощность заряда и отдачи; None, если накопителя нет."""
+    if not records or records[0].storage_soc is None:
+        return None
+    x = _hours(records)
+    figure = go.Figure()
+    figure.add_trace(go.Scatter(
+        x=x, y=[record.storage_soc * 100 for record in records],
+        name="SoC, %", mode="lines", line=dict(color="#264653"),
+    ))
+    figure.add_trace(go.Bar(
+        x=x, y=[record.storage_charge_kw for record in records],
+        name="Заряд, кВт", yaxis="y2", marker_color="#2a9d8f", opacity=0.5,
+    ))
+    figure.add_trace(go.Bar(
+        x=x, y=[-record.storage_discharge_kw for record in records],
+        name="Отдача, кВт", yaxis="y2", marker_color="#e76f51", opacity=0.5,
+    ))
+    figure.update_layout(
+        title=title, xaxis_title=X_TITLE, barmode="relative", height=380,
+        yaxis=dict(title="SoC, %", range=[0, 100]),
+        yaxis2=dict(title="Мощность, кВт", overlaying="y", side="right"),
+        legend=dict(orientation="h"),
     )
     return figure
