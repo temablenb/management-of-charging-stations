@@ -9,6 +9,7 @@ from mas.ev_models import load_ev_models
 from ui.results_view import render_results
 from ui.run_view import RunView
 from ui.sim_runner import run_pair
+from ui.runs_store import RUNS_DIR, save_pair
 
 VIEW_KEY = "sim_view"
 
@@ -66,8 +67,10 @@ def run_simulation(config: ScenarioConfig) -> RunView:
 def render_simulation_page() -> None:
     st.subheader("Симуляция мультиагентной системы")
     config = scenario_form()
+    save = st.checkbox("Сохранять прогон в папку runs", value=True, key="sim_save")
     if config is not None and st.button("Запустить симуляцию", type="primary", key="sim_run"):
-        st.session_state[VIEW_KEY] = run_simulation(config)
-    view = st.session_state.get(VIEW_KEY)
-    if view is not None:
-        render_results(view)
+        view = run_simulation(config)
+        st.session_state[VIEW_KEY] = view
+        if save:
+            paths = save_pair(view)
+            st.success(f"Прогон сохранён: {', '.join(path.name for path in paths)}")
