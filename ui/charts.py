@@ -121,3 +121,13 @@ def soc_figure(records: list[TickRecord], title: str = "Накопитель э�
         legend=dict(orientation="h"),
     )
     return figure
+
+
+def slice_days(records: list[TickRecord], first_day: int, last_day: int) -> list[TickRecord]:
+    """Записи за сутки с first_day по last_day включительно (нумерация с 1)."""
+    if first_day < 1 or last_day < first_day:
+        raise ValueError("Сутки заданы неверно")
+    start = (first_day - 1) * TICKS_PER_DAY
+    stop = last_day * TICKS_PER_DAY
+    return [record for record in records if start <= record.tick < stop]
+

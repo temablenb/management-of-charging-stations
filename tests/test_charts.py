@@ -3,7 +3,7 @@ import pytest
 from mas.clock import TICKS_PER_DAY
 from mas.metrics import TickRecord
 from ui.charts import (
-    price_figure, soc_figure, station_load_figure, tick_hours, total_load_figure,
+    price_figure, soc_figure, station_load_figure, tick_hours, total_load_figure, slice_days
 )
 
 
@@ -62,3 +62,16 @@ def test_soc_figure_has_level_and_power_traces():
     figure = soc_figure(make_records(soc=0.5))
     assert len(figure.data) == 3
     assert figure.data[0].y[0] == pytest.approx(50.0)
+
+
+def test_slice_days_keeps_requested_days():
+    part = slice_days(make_records(), 2, 2)
+    assert len(part) == TICKS_PER_DAY
+    assert part[0].tick == TICKS_PER_DAY
+
+
+def test_slice_days_rejects_wrong_range():
+    with pytest.raises(ValueError):
+        slice_days(make_records(), 2, 1)
+    with pytest.raises(ValueError):
+        slice_days(make_records(), 0, 1)
