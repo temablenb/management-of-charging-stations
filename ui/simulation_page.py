@@ -2,9 +2,16 @@
 
 import streamlit as st
 
-from mas.cli import apply_overrides
 from mas.scenario import ScenarioConfig
 from ui.scenarios import available_scenarios, load_by_name
+from mas.cli import DEFAULT_MODELS_PATH, apply_overrides
+from mas.ev_models import load_ev_models
+from ui.results_view import render_results
+from ui.run_view import RunView
+from ui.sim_runner import run_pair
+
+VIEW_KEY = "sim_view"
+
 
 def render_simulation_page() -> None:
     st.subheader("Симуляция мультиагентной системы")
@@ -37,3 +44,30 @@ def scenario_form() -> ScenarioConfig | None:
     except ValueError as error:
         st.error(str(error))
         return None
+
+
+def run_simulation(config: ScenarioConfig) -> RunView:
+    bar = st.progress(0.0, text="Подготовка…")
+    last = [-1]
+
+    def on_progress(share: float, label: str) -> None:
+        percent = int(share * 100)
+        if percent != last[0]:
+            last[0] = percent
+            bar.progress(min(share, 1.0), text=f"{label}: {percent}%")
+
+    comparison, mas, baseline = run_pair(
+        config, load_ev_models(DEFAULT_MODELS_PATH), progress=on_progress
+    )
+    bar.empty()
+    return RunView.from_live(comparison, mas, baseline)
+
+
+def render_simulation_page() -> None:
+    st.subheader("Симуляция мультиагентной системы")
+    config = scenario_form()
+    if config is not None and st.button("Запустить симуляцию", type="primary", key="sim_run"):
+        st.session_state[VIEW_KEY] = run_simulation(config)
+    view = st.session_state.get(VIEW_KEY)
+    if view is not None:
+        render_results(view)
