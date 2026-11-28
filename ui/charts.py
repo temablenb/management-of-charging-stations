@@ -131,3 +131,21 @@ def slice_days(records: list[TickRecord], first_day: int, last_day: int) -> list
     stop = last_day * TICKS_PER_DAY
     return [record for record in records if start <= record.tick < stop]
 
+
+def queue_figure(records: list[TickRecord], station_id: str, title: str = "Очередь станции") -> go.Figure:
+    """Сколько автомобилей заряжается и сколько ждёт на станции."""
+    x = _hours(records)
+    figure = go.Figure()
+    figure.add_trace(go.Scatter(
+        x=x, y=[record.charging.get(station_id, 0) for record in records],
+        name="Заряжаются", stackgroup="queue", mode="lines",
+    ))
+    figure.add_trace(go.Scatter(
+        x=x, y=[record.waiting.get(station_id, 0) for record in records],
+        name="Ожидают", stackgroup="queue", mode="lines",
+    ))
+    figure.update_layout(
+        title=f"{title}: {station_id}", xaxis_title=X_TITLE,
+        yaxis_title="Автомобилей", height=320, legend=dict(orientation="h"),
+    )
+    return figure

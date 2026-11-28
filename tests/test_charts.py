@@ -3,7 +3,7 @@ import pytest
 from mas.clock import TICKS_PER_DAY
 from mas.metrics import TickRecord
 from ui.charts import (
-    price_figure, soc_figure, station_load_figure, tick_hours, total_load_figure, slice_days
+    price_figure, soc_figure, station_load_figure, tick_hours, total_load_figure, slice_days, queue_figure
 )
 
 
@@ -75,3 +75,14 @@ def test_slice_days_rejects_wrong_range():
         slice_days(make_records(), 2, 1)
     with pytest.raises(ValueError):
         slice_days(make_records(), 0, 1)
+
+
+def test_queue_figure_stacks_charging_and_waiting():
+    figure = queue_figure(make_records(), "st-2")
+    assert [trace.name for trace in figure.data] == ["Заряжаются", "Ожидают"]
+    assert figure.data[1].y[0] == 3
+
+
+def test_queue_figure_of_unknown_station_is_zero():
+    figure = queue_figure(make_records(), "st-99")
+    assert set(figure.data[0].y) == {0}
